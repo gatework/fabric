@@ -44,7 +44,13 @@ func (c *Client) With(ctx context.Context, run func(context.Context, *Session) e
 // Opener adapts the client to go-netops apply.
 func (c *Client) Opener() apply.Opener[*device.Config] {
 	return func(ctx context.Context, run func(context.Context, apply.Session[*device.Config]) error) (error, error) {
-		return c.open(ctx, func(ctx context.Context, s *Session) error { return run(ctx, s) })
+		return c.open(ctx, func(ctx context.Context, s *Session) error {
+			// Readbacks must not page or wrap.
+			if err := s.Prepare(ctx); err != nil {
+				return err
+			}
+			return run(ctx, s)
+		})
 	}
 }
 
