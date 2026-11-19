@@ -1,13 +1,16 @@
 package cli
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/gatework/go-netops/evidence"
 
+	"github.com/gatework/fabric/capacity"
 	"github.com/gatework/fabric/device"
 	"github.com/gatework/fabric/endpoint"
 	"github.com/gatework/fabric/internal/bootstrap"
@@ -208,4 +211,73 @@ func printTopology(e env, audits []topology.Audit) int {
 		}
 	}
 	return bad
+}
+
+func newCapacity(e env) *cobra.Command {
+	var ff fleetFlags
+	var region string
+	var lim capacity.Limits
+	var top int
+	var asJSON bool
+	c := &cobra.Command{
+		Use:   "capacity",
+		Short: "容量：区域资源池与单机规模（VLAN、端口、MAC 表、NVE 对端、聚合）",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			fleet, err := ff.load(cmd, []evidence.Dimension{device.DimConfig, device.DimInterfaces, device.DimMACs, device.DimNVEPeers})
+			if err != nil {
+				return err
+			}
+			regions := workflow.Capacity(fleet, region, lim)
+			if asJSON {
+				return writeJSON(e, regions)
+			}
+			printCapacity(e, regions, top)
+			return nil
+		},
+	}
+	ff.bind(c, false)
+	d := capacity.DefaultLimits()
+	c.Flags().StringVar(&region, "region", "", "只看一个区域")
+	c.Flags().IntVar(&lim.VLANs, "max-vlans", d.VLANs, "单机 VLAN 上限")
+	c.Flags().IntVar(&lim.MACs, "max-macs", d.MACs, "单机 MAC 表上限")
+	c.Flags().IntVar(&lim.NVEPeers, "max-nve-peers", d.NVEPeers, "单机 NVE 对端上限")
+	c.Flags().IntVar(&lim.PortChannels, "max-port-channels", d.PortChannels, "单机 port-channel 上限")
+	c.Flags().IntVar(&top, "top", 5, "每区域列出利用率最高的交换机数")
+	c.Flags().BoolVar(&asJSON, "json", false, "输出 JSON")
+	return c
+}
+
+func pct(u capacity.Usage) string {
+	switch {
+	case u.Used < 0:
+		return "?"
+	case u.Total <= 0:
+		return fmt.Sprintf("%d", u.Used)
+	default:
+		return fmt.Sprintf("%d/%d %.0f%%", u.Used, u.Total, u.Percent())
+	}
+}
+
+func peak(s capacity.Switch) float64 {
+	best := 0.0
+	for _, u := range s.All() {
+		best = max(best, u.Percent())
+	}
+	return best
+}
+
+func printCapacity(e env, regions []capacity.Region, top int) {
+	w := e.stdout
+	for _, r := range regions {
+		_, _ = fmt.Fprintf(w, "区域 %s\n", r.Name)
+		for _, u := range r.Pools {
+			_, _ = fmt.Fprintf(w, "  %-28s %s\n", u.Name, pct(u))
+		}
+		sw := slices.Clone(r.Switches)
+		slices.SortFunc(sw, func(a, b capacity.Switch) int { return cmp.Compare(peak(b), peak(a)) })
+		_, _ = fmt.Fprintf(w, "  利用率最高的交换机：\n  %-18s %-16s %-16s %-18s %-14s %s\n", "交换机", "VLAN", "以太网端口", "MAC 表", "NVE 对端", "port-channel")
+		for _, s := range sw[:min(top, len(sw))] {
+			_, _ = fmt.Fprintf(w, "  %-18s %-16s %-16s %-18s %-14s %s\n", s.Name, pct(s.VLANs), pct(s.Ports), pct(s.MACs), pct(s.NVEPeers), pct(s.PortChannels))
+		}
+	}
 }

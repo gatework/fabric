@@ -5,6 +5,8 @@ import (
 
 	"github.com/gatework/go-netops/assess"
 
+	"github.com/gatework/fabric"
+	"github.com/gatework/fabric/capacity"
 	"github.com/gatework/fabric/check"
 	"github.com/gatework/fabric/endpoint"
 	"github.com/gatework/fabric/status"
@@ -66,6 +68,22 @@ func Topology(f *Fleet, region string) []topology.Audit {
 		if region == "" || r.Name == region {
 			out = append(out, topology.Run(r, f.Members(r.Name)))
 		}
+	}
+	return out
+}
+
+// Capacity measures every region of the fleet.
+func Capacity(f *Fleet, region string, lim capacity.Limits) []capacity.Region {
+	var out []capacity.Region
+	for _, name := range f.Regions() {
+		if region != "" && name != region {
+			continue
+		}
+		var ir *fabric.Region
+		if f.Intent != nil {
+			ir, _ = f.Intent.Region(name)
+		}
+		out = append(out, capacity.Compute(name, ir, f.Members(name), lim))
 	}
 	return out
 }

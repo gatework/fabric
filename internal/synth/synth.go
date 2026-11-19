@@ -148,6 +148,9 @@ func (g *gen) spine(i int) map[string]string {
 	for l := range s.Leaves {
 		fmt.Fprintf(&c, "interface Ethernet1/%d\n  no switchport\n  mtu 9216\n  ip address %s\n  ip ospf network point-to-point\n  ip router ospf 10 area 0.0.0.0\n  no shutdown\n", l+1, g.linkEnd(l, i, 1))
 	}
+	for p := s.Leaves + 1; p <= s.Leaves+s.Leaves/2+4; p++ {
+		fmt.Fprintf(&c, "interface Ethernet1/%d\n", p)
+	}
 	fmt.Fprintf(&c, "interface loopback0\n  ip address %s/32\n  ip router ospf 10 area 0.0.0.0\n", g.lo0(200+i))
 	fmt.Fprintf(&c, "router ospf 10\n  router-id %s\n", g.lo0(200+i))
 	fmt.Fprintf(&c, "router bgp %d\n  router-id %s\n  template peer VTEPS\n    remote-as %d\n    update-source loopback0\n    address-family l2vpn evpn\n      send-community\n      send-community extended\n      route-reflector-client\n  neighbor 10.%d.0.0/24\n    inherit peer VTEPS\n",

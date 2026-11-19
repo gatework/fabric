@@ -2,9 +2,9 @@ goos: darwin
 goarch: arm64
 pkg: github.com/gatework/fabric/internal/synth
 cpu: Apple M5
-BenchmarkLoadSnapshot1000-10    	       3	 332238472 ns/op	1355347482 B/op	 5279377 allocs/op
-BenchmarkLoadConfig1000-10      	       3	 143638208 ns/op	300945722 B/op	 2923920 allocs/op
-BenchmarkCheck1000-10           	       3	  45908708 ns/op	412742344 B/op	 2790003 allocs/op
-BenchmarkPlan1000-10            	       3	  18387264 ns/op	174258282 B/op	 1831742 allocs/op
+BenchmarkLoadSnapshot1000-10    	       3	 347330056 ns/op	1380395482 B/op	 5423958 allocs/op
+BenchmarkLoadConfig1000-10      	       3	 142340833 ns/op	325942005 B/op	 3068494 allocs/op
+BenchmarkCheck1000-10           	       3	 119197681 ns/op	832495304 B/op	 3096916 allocs/op
+BenchmarkPlan1000-10            	       3	  20737555 ns/op	182532992 B/op	 1860298 allocs/op
 PASS
-ok  	github.com/gatework/fabric/internal/synth	5.348s
+ok  	github.com/gatework/fabric/internal/synth	5.473s

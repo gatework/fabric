@@ -12,9 +12,11 @@ import (
 	"github.com/gatework/go-netops/evidence"
 
 	"github.com/gatework/fabric"
+	"github.com/gatework/fabric/governance"
 	"github.com/gatework/fabric/internal/workflow"
 	"github.com/gatework/fabric/plan"
 	"github.com/gatework/fabric/provision"
+	"github.com/gatework/fabric/status"
 	"github.com/gatework/fabric/vendors/nxos"
 )
 
@@ -212,6 +214,9 @@ func TestCorpusProvisioning(t *testing.T) {
 			continue
 		}
 		planned += checkBundle(t, p)
+		if p.Bundle.Risk.Class != governance.ClassStandard || p.Bundle.Risk.Endpoints != 0 {
+			t.Errorf("region %d: a new gateway is %s with %d endpoints", i, p.Bundle.Risk.Class, p.Bundle.Risk.Endpoints)
+		}
 		vlan, vni := allocatedValue(p.Result, "vlan"), allocatedValue(p.Result, "vni")
 		if gw.VNI != 0 {
 			vni = gw.VNI.String()
@@ -241,6 +246,9 @@ func TestCorpusProvisioning(t *testing.T) {
 			continue
 		}
 		planned += checkBundle(t, p)
+		if p.Bundle.Risk.Class != governance.ClassMajor {
+			t.Errorf("region %d: a new leaf (spine underlay change) is %s", i, p.Bundle.Risk.Class)
+		}
 		nr, ns, _ := p.Intent.Locate(leaf.Name)
 		d := plan.Compile(nr, ns)
 		text, err := nxos.Day0(d)
@@ -287,4 +295,40 @@ func BenchmarkCorpusLoad(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+// TestCorpusAssurance computes health and cabling for every region; with
+// complete evidence nothing may be unknown.
+func TestCorpusAssurance(t *testing.T) {
+	f := corpus(t)
+	in, _ := workflow.Import(f)
+	f.Intent = in
+	for _, sw := range f.Switches {
+		if r, s, ok := in.Locate(sw.Name); ok {
+			sw.Region, sw.Role = r.Name, s.Role
+		}
+	}
+	rep, _, err := workflow.Status(t.Context(), workflow.CheckRequest{Fleet: f})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, r := range rep.Regions {
+		if r.Level == status.LevelUnknown || r.Levels["未知"] > 0 {
+			t.Errorf("region %d has unknown health", i)
+		}
+		t.Logf("region %d: %s worst %d mean %d levels %v", i, r.Level, r.Worst, r.Mean, r.Levels)
+	}
+	states := map[string]int{}
+	for _, a := range workflow.Topology(f, "") {
+		for _, c := range a.Links {
+			states[c.State.String()]++
+			if len(c.Mismatch) > 0 {
+				states["配置不一致"]++
+			}
+		}
+		states["无互联"] += len(a.Unmeshed)
+	}
+	t.Logf("cabling %v", states)
+	macs, ips := workflow.Endpoints(f).Count()
+	t.Logf("endpoints indexed: %d MACs, %d IPs", macs, ips)
 }

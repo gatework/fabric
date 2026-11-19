@@ -18,6 +18,7 @@ func newDeploy(e env) *cobra.Command {
 	var planDir, confirm, journal string
 	var doApply, save bool
 	var ssh bootstrap.SSH
+	var gf gateFlags
 	c := &cobra.Command{
 		Use:   "deploy",
 		Short: "按批次下发计划（默认只预览；--apply 才写入设备）",
@@ -45,7 +46,7 @@ func newDeploy(e env) *cobra.Command {
 				return err
 			}
 			rep := workflow.Deploy(cmd.Context(), workflow.DeployRequest{
-				Bundle: b, Dial: ssh.Dialer(creds), Journal: store.NewJournal(st), Save: save,
+				Bundle: b, Dial: ssh.Dialer(creds), Journal: store.NewJournal(st), Save: save, Gate: gf.options(),
 			})
 			if err := st.PublishJSON(cmd.Context(), "deploy.json", rep); err != nil {
 				return err
@@ -65,6 +66,7 @@ func newDeploy(e env) *cobra.Command {
 	c.Flags().StringVar(&journal, "journal", "executions", "执行记录根目录")
 	_ = c.MarkFlagRequired("plan")
 	sshFlags(c, &ssh)
+	gf.bind(c)
 	return c
 }
 
@@ -109,6 +111,16 @@ func outcomeText(o workflow.Outcome) string {
 
 func printDeploy(e env, rep workflow.DeployReport) {
 	w := e.stdout
+	if !rep.Decision.Allowed {
+		_, _ = fmt.Fprintln(w, "\n变更闸门拒绝执行，未连接任何设备：")
+		for _, r := range rep.Decision.Refusals {
+			_, _ = fmt.Fprintf(w, "  - %s\n", r)
+		}
+		return
+	}
+	for _, b := range rep.Decision.Bypassed {
+		_, _ = fmt.Fprintf(w, "\n⚠ 紧急变更，已绕过：%s（原因：%s）\n", b, rep.Decision.Reason)
+	}
 	_, _ = fmt.Fprintln(w, "\n下发结果：")
 	for _, r := range rep.Results {
 		line := fmt.Sprintf("  第 %d 批 %s：%s", r.Wave, r.Switch, outcomeText(r.Outcome))
@@ -146,11 +158,19 @@ func newRollback(e env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fp, err := workflow.Rollback(cmd.Context(), ssh.Dialer(creds)(addr), checkpoint)
+			res, err := workflow.Rollback(cmd.Context(), ssh.Dialer(creds)(addr), checkpoint)
 			if err != nil {
 				return err
 			}
-			_, _ = fmt.Fprintf(e.stdout, "%s 已回滚到 %s，当前配置指纹 %s\n", mgmt, checkpoint, fp[:12])
+			_, _ = fmt.Fprintf(e.stdout, "%s 已回滚到 %s，当前配置指纹 %s\n", mgmt, checkpoint, res.Fingerprint[:12])
+			_, _ = fmt.Fprintf(e.stdout, "健康复核：NVE 对端 %d→%d，EVPN 会话 %d→%d，OSPF %d→%d\n",
+				len(res.Before.NVEPeers), len(res.After.NVEPeers), len(res.Before.BGPSessions), len(res.After.BGPSessions), len(res.Before.OSPF), len(res.After.OSPF))
+			for _, r := range res.Recovered {
+				_, _ = fmt.Fprintf(e.stdout, "  恢复：%s\n", strings.ReplaceAll(r, " lost", ""))
+			}
+			if len(res.Lost) > 0 {
+				return exit(ExitFindings, "回滚后仍有丢失：%s", strings.Join(res.Lost, "、"))
+			}
 			return nil
 		},
 	}

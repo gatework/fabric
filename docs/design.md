@@ -76,17 +76,36 @@ Each command: validate against intent (+ snapshot) → allocate from region pool
 | `numbering` | deterministic number and address allocation | — |
 | `provision` | typed operator requests, observation checks | fabric, device, numbering |
 
+## Assure and govern
+
+```
+fabric status     health per switch and region: control-plane ratios, findings, 0-100 score (ADR 0009)
+fabric locate     MAC/IP → attaching switch and port (vPC aware), remote VTEPs, anomalies
+fabric topology   intent links vs CDP and both ends' config; leaf × spine matrix
+fabric capacity   pools and per-switch scale (VLAN, ports, MAC, NVE peers, bundles)
+fabric report deploy   post-implementation review of an execution
+```
+
+Plans carry impact (VLANs, tenants, ports, vPCs, underlay, endpoints disturbed), a change record and a risk class; deploy passes the change gate first (ADR 0010). Performance method and numbers: ADR 0011.
+
+| Package | Role | May import |
+|---|---|---|
+| `status`, `endpoint`, `topology`, `capacity` | views of the observed fabric | fabric, device |
+| `governance` | change records, risk classes, gate | fabric, device, plan |
+| `internal/parallel` | ordered bounded worker pool | — |
+| `internal/synth` | synthetic fabrics for benchmarks and tests | everything |
+
 ## Next stage (designed, not yet built)
 
-### M5.1 Endpoint locator — `fabric locate MAC|IP`
+### M5.1 Endpoint locator — built in phase 3 (`fabric locate`)
 
 Index `show l2route evpn mac-ip all`, `show l2route evpn mac all` and `show mac address-table` from every switch of every region. For a MAC or IP return: region, VLAN/VNI, the VTEP that learned it locally (`Local`/`HMM` producer), the port or vPC, and every remote VTEP that installed it, with sequence numbers. Flag mobility (rising sequence numbers), duplicates (`Dup`, `PF`) and disagreement between the local table and BGP. Data model: `endpoint.Index{byMAC, byIP}` built from `device.State`; pure, in a new `endpoint` package; CLI reads a snapshot.
 
-### M5.2 Cabling and underlay audit — `fabric topology`
+### M5.2 Cabling and underlay audit — built in phase 3 (`fabric topology`)
 
 From CDP and configuration: every leaf connects to every spine of its region; fabric links are routed point-to-point /30 or /31 with MTU 9216 on both ends; OSPF area and network type agree on both ends; vPC peers are cabled for keepalive (and peer-link when physical); no leaf-to-leaf links outside vPC pairs. Output both findings (as fabric rules) and a per-region adjacency matrix.
 
-### M5.3 Change impact
+### M5.3 Change impact — built in phase 3 (plan impact and risk)
 
 Before deploy, annotate each plan with the endpoints behind every touched VLAN/VNI and port (from M5.1), and the vPC members affected, so the operator reviews business impact rather than commands.
 

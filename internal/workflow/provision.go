@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gatework/fabric"
+	"github.com/gatework/fabric/governance"
 	"github.com/gatework/fabric/provision"
 )
 
@@ -18,6 +19,8 @@ type ProvisionRequest struct {
 	// Fleet, when given, is checked for collisions and planned.
 	Fleet *Fleet
 	Now   time.Time
+	// Change is the change record of the resulting plan.
+	Change governance.Record
 }
 
 // Provisioned is a changed intent and, with a fleet, its plan.
@@ -61,7 +64,7 @@ func Provision(req ProvisionRequest) (*Provisioned, error) {
 	}
 	out.Bundle, err = Plan(PlanRequest{
 		Fleet: fleet, Switches: observed, Reset: res.Reset, Networks: res.RemovedNetworks,
-		Removed: res.RemovedNeighbors, Now: req.Now, Before: req.Intent,
+		Removed: res.RemovedNeighbors, Now: req.Now, Before: req.Intent, Change: req.Change,
 	})
 	return out, err
 }

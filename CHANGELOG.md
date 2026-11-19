@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### 保障、治理、容量与性能
+
+- `status` 健康评分、`locate` 终端定位、`topology` 布线审计、`capacity` 容量、`report deploy` 变更复盘。
+- 新规则：互联缺失/错接/未声明/两端不一致、leaf–spine 全互联、重复 IP、资源池利用率、单机规模（共 42 条）。
+- 计划影响分析与变更等级；变更记录（工单、申请人、原因、窗口、有效期）参与计划 ID；下发闸门；回滚后健康复核。
+- 性能：并行与按需加载、去正则表解析；1000 台加载 2.18s→0.35s，检查 145ms→64ms；语料解析结果逐行一致。
+
 ### 日常业务与 underlay 纳管
 
 - 业务命令：`network add/remove`、`tenant add`、`switch add/remove/day0`、`port assign/release/free`；自动分配 VLAN/VNI/loopback/互联子网/vPC 域/port-channel；写回意图并只规划本次变更。

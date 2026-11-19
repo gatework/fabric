@@ -27,6 +27,7 @@ type changeFlags struct {
 	snapshot string
 	output   string
 	dryRun   bool
+	record   recordFlags
 }
 
 func (f *changeFlags) bind(c *cobra.Command) {
@@ -35,6 +36,7 @@ func (f *changeFlags) bind(c *cobra.Command) {
 	c.Flags().StringVarP(&f.output, "output", "o", "plans", "计划根目录")
 	c.Flags().BoolVar(&f.dryRun, "dry-run", false, "只显示变更，不写意图与计划")
 	_ = c.MarkFlagRequired("intent")
+	f.record.bind(c)
 }
 
 func (f *changeFlags) run(cmd *cobra.Command, e env, req provision.Request) error {
@@ -42,10 +44,15 @@ func (f *changeFlags) run(cmd *cobra.Command, e env, req provision.Request) erro
 	if err != nil {
 		return err
 	}
-	preq := workflow.ProvisionRequest{Intent: in, Request: req, Now: time.Now()}
+	now := time.Now()
+	rec, err := f.record.record(e, now)
+	if err != nil {
+		return err
+	}
+	preq := workflow.ProvisionRequest{Intent: in, Request: req, Now: now, Change: rec}
 	if f.snapshot != "" {
 		if preq.Fleet, err = workflow.LoadSnapshot(cmd.Context(), f.snapshot, in, workflow.LoadOptions{
-			Dimensions: []evidence.Dimension{device.DimConfig, device.DimMACs, device.DimInterfaces},
+			Dimensions: append(workflow.ImpactDimensions(), device.DimInterfaces),
 		}); err != nil {
 			return err
 		}

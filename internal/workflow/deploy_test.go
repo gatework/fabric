@@ -15,6 +15,7 @@ import (
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/device"
+	"github.com/gatework/fabric/governance"
 	"github.com/gatework/fabric/internal/workflow"
 	"github.com/gatework/fabric/plan"
 	"github.com/gatework/fabric/rollout"
@@ -165,8 +166,39 @@ func deploy(tb testing.TB, b *workflow.Bundle, fakes map[netip.Addr]*fakeSwitch)
 		Bundle:  b,
 		Dial:    func(a netip.Addr) workflow.Switch { return fakes[a] },
 		Journal: &memJournal{},
+		Gate:    governance.GateOptions{AckRisk: true},
 		Now:     func() time.Time { return time.Unix(0, 0) },
 	})
+}
+
+func TestGateRefusalContactsNoDevice(t *testing.T) {
+	t.Parallel()
+	b := bundle(t)
+	b.Risk.Class = governance.ClassMajor
+	fakes := switches(t, b)
+	rep := workflow.Deploy(t.Context(), workflow.DeployRequest{
+		Bundle: b, Dial: func(a netip.Addr) workflow.Switch { return fakes[a] }, Journal: &memJournal{},
+		Now: func() time.Time { return time.Unix(0, 0) },
+	})
+	if rep.OK() || rep.Decision.Allowed || len(rep.Results) != 0 {
+		t.Fatalf("report = %+v", rep)
+	}
+	for _, f := range fakes {
+		if len(f.checkpts) != 0 || len(f.written) != 0 {
+			t.Error("a refused gate reached a device")
+		}
+	}
+}
+
+func TestDeployRecordsHealthForReview(t *testing.T) {
+	t.Parallel()
+	b := bundle(t)
+	rep := deploy(t, b, switches(t, b))
+	for _, r := range rep.Results {
+		if r.Before == nil || r.After == nil || len(r.Before.NVEPeers) != 1 {
+			t.Errorf("%s health = %+v %+v", r.Switch, r.Before, r.After)
+		}
+	}
 }
 
 func outcomes(rep workflow.DeployReport) []workflow.Outcome {

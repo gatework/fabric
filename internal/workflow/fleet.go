@@ -40,6 +40,12 @@ type LoadOptions struct {
 	Workers int
 }
 
+// ImpactDimensions loads configurations and the tables that locate
+// endpoints, so plans can count the hosts they disturb.
+func ImpactDimensions() []evidence.Dimension {
+	return []evidence.Dimension{device.DimConfig, device.DimMACs, device.DimL2Routes, device.DimMACIPs}
+}
+
 // ConfigOnly loads only running configurations.
 func ConfigOnly() []evidence.Dimension { return []evidence.Dimension{device.DimConfig} }
 

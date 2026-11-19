@@ -7,7 +7,7 @@
 | 能力 | 命令 | 说明 |
 |---|---|---|
 | 采集 | `fabric collect` | 每台交换机一个目录：running-config 与 11 个 show 命令的原始回显（与现有快照格式兼容） |
-| 检查 | `fabric check` | 34 条规则：VNI 配置链、运行状态、vPC/VTEP、安全、跨 VTEP 一致性、意图/基线偏差、相对上次采集的退化 |
+| 检查 | `fabric check` | 42 条规则：VNI 配置链、运行状态、vPC/VTEP、安全、跨 VTEP 一致性、意图/基线偏差、相对上次采集的退化 |
 | 存量纳管 | `fabric import` | 从现网反推意图草稿，分歧列为冲突，不猜测 |
 | 基线 | `fabric baseline derive` | 按现网多数值生成黄金配置草稿（默认 → 角色 → 区域 → 区域内角色） |
 | 规划 | `fabric plan` | 意图（+基线）→ 每台交换机有序操作 → 模拟收敛 + 安全检查 → NX-OS 命令与回滚脚本 → 分批 |
@@ -30,6 +30,20 @@ fabric port assign --intent intent.yaml --snapshot snap/ --vpc LEF01 --member LE
 ```
 
 每条命令：校验（意图 + 现网）→ 自动分配 → 更新意图（保留 .bak）→ 只为这次变更生成计划（不夹带存量偏差）→ `fabric deploy` 分批下发。
+
+## 保障与治理
+
+```sh
+fabric status   --snapshot snap/ --intent intent.yaml           # 全网健康评分（证据不全显示未知）
+fabric locate   10.1.44.23 --snapshot snap/ --intent intent.yaml # 终端在哪台交换机哪个口
+fabric topology --snapshot snap/ --intent intent.yaml           # 布线审计 + leaf×spine 矩阵
+fabric capacity --snapshot snap/ --intent intent.yaml           # 资源池与单机规模
+fabric plan ... --ticket CHG-123 --reason "新增 DB 网段" --window 22:00-06:00
+fabric deploy --plan DIR --apply --confirm ID [--ack-risk] [--emergency --emergency-reason ...]
+fabric report deploy --journal executions/<批次> --format markdown  # 变更复盘
+```
+
+计划自动标注影响（VLAN、租户、端口、vPC、underlay、受影响在线终端）与变更等级（标准/常规/重大）；重大变更逐台下发并需 `--ack-risk`；过期、窗口外、缺工单的计划在连接设备前即被拒绝。
 
 ## 快速开始
 

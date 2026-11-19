@@ -66,6 +66,9 @@ func (g *gen) leaf(i int) map[string]string {
 	for h := range 20 {
 		w("interface Ethernet1/%d\n  switchport\n  switchport access vlan %d\n  spanning-tree port type edge\n  no shutdown\n", h+1, 100+h%s.Networks)
 	}
+	for p := 21; p < 49; p++ {
+		w("interface Ethernet1/%d\n", p)
+	}
 	for sp := range s.Spines {
 		w("interface Ethernet1/%d\n  no switchport\n  mtu 9216\n  ip address %s\n  ip ospf network point-to-point\n  ip router ospf 10 area 0.0.0.0\n  no shutdown\n", 49+sp, g.linkEnd(i, sp, 0))
 	}

@@ -306,11 +306,12 @@ func newPlan(e env) *cobra.Command {
 	var switches []string
 	var prune bool
 	var strategy rollout.Strategy
+	var rf recordFlags
 	c := &cobra.Command{
 		Use:   "plan",
 		Short: "按意图（与基线）生成经过闭环验证的分批变更计划",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			fleet, err := ff.load(cmd, workflow.ConfigOnly())
+			fleet, err := ff.load(cmd, workflow.ImpactDimensions())
 			if err != nil {
 				return err
 			}
@@ -318,9 +319,14 @@ func newPlan(e env) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			now := time.Now()
+			rec, err := rf.record(e, now)
+			if err != nil {
+				return err
+			}
 			b, err := workflow.Plan(workflow.PlanRequest{
 				Fleet: fleet, Baseline: base, Region: region, Switches: switches,
-				Prune: prune, Strategy: strategy, Now: time.Now(),
+				Prune: prune, Strategy: strategy, Now: now, Change: rec,
 			})
 			if err != nil {
 				return err
@@ -348,12 +354,16 @@ func newPlan(e env) *cobra.Command {
 	c.Flags().IntVar(&strategy.WaveSize, "wave-size", 4, "每批 leaf 数量上限")
 	c.Flags().BoolVar(&strategy.NoCanary, "no-canary", false, "不单独先变更一台金丝雀 leaf")
 	c.Flags().StringVarP(&output, "output", "o", "plans", "计划根目录")
+	rf.bind(c)
 	return c
 }
 
 func printBundle(e env, b *workflow.Bundle) {
 	w := e.stdout
 	_, _ = fmt.Fprintf(w, "规划结果：%d 台需要变更，%d 台已符合，%d 台拒绝\n", len(b.Items), b.Unchanged, len(b.Refused))
+	if len(b.Items) > 0 {
+		printGovernance(e, b)
+	}
 	for _, r := range b.Refused {
 		_, _ = fmt.Fprintf(w, "  拒绝 %s：%s\n", r.Switch, r.Reason)
 	}
@@ -365,7 +375,7 @@ func printBundle(e env, b *workflow.Bundle) {
 			for k, n := range it.Summary {
 				parts = append(parts, fmt.Sprintf("%s×%d", k, n))
 			}
-			_, _ = fmt.Fprintf(w, "  %s [%s] %d 条命令：%s\n", m.Name, m.Role, len(it.Plan.Commands()), strings.Join(slices.Sorted(slices.Values(parts)), "，"))
+			_, _ = fmt.Fprintf(w, "  %s [%s] %d 条命令：%s%s\n", m.Name, m.Role, len(it.Plan.Commands()), strings.Join(slices.Sorted(slices.Values(parts)), "，"), impactText(it))
 		}
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/baseline"
 	"github.com/gatework/fabric/device"
+	"github.com/gatework/fabric/endpoint"
 	"github.com/gatework/fabric/plan"
 	"github.com/gatework/fabric/topology"
 )
@@ -72,6 +73,7 @@ func FabricRules() []assess.Rule[*Fabric] {
 		fabricRule(RuleLinkInconsistent, "互联两端配置不一致（MTU/OSPF/子网）", high, cons, cfg, linkMismatch),
 		fabricRule(RuleLeafSpineMesh, "VTEP 未与全部 spine 互联", med, cons, cfg, unmeshed),
 		fabricRule(RuleDuplicateIP, "同一 IP 被多个 MAC 宣告", high, rt, []evidence.Dimension{device.DimMACIPs}, duplicateIPs),
+		poolRule(),
 	}
 }
 
@@ -468,7 +470,7 @@ func unmeshed(f *Fabric, sub assess.Subject) []assess.Finding {
 }
 
 func duplicateIPs(f *Fabric, sub assess.Subject) []assess.Finding {
-	dups := f.Endpoints().DuplicateIPs()
+	dups := endpoint.DuplicateIPs(f.Switches)
 	var out []assess.Finding
 	for _, ip := range slices.Sorted(maps.Keys(dups)) {
 		macs := dups[ip]

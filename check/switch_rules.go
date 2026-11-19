@@ -82,6 +82,7 @@ func SwitchRules() []assess.Rule[*device.Switch] {
 		switchRule(RuleVPCUnhealthy, "vPC 对端或一致性异常", crit, rt, []evidence.Dimension{device.DimVPC}, vpcUnhealthy),
 		switchRule(RulePortChannelDown, "Port-channel 成员未捆绑", med, rt, []evidence.Dimension{device.DimPortChannels}, portChannelDown),
 		switchRule(RuleDuplicateMAC, "EVPN 检测到重复或冻结的 MAC", high, rt, []evidence.Dimension{device.DimL2Routes}, duplicateMACs),
+		scaleRule(),
 	}
 }
 

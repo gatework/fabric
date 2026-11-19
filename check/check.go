@@ -13,7 +13,6 @@ import (
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/baseline"
 	"github.com/gatework/fabric/device"
-	"github.com/gatework/fabric/endpoint"
 	"github.com/gatework/fabric/topology"
 )
 
@@ -32,8 +31,6 @@ type Fabric struct {
 
 	auditOnce sync.Once
 	audit     topology.Audit
-	indexOnce sync.Once
-	index     *endpoint.Index
 }
 
 // Topology returns the cabling audit, computed once.
@@ -46,20 +43,6 @@ func (f *Fabric) Topology() topology.Audit {
 		f.audit = topology.Run(r, f.Switches)
 	})
 	return f.audit
-}
-
-// Endpoints returns the host index, computed once.
-func (f *Fabric) Endpoints() *endpoint.Index {
-	f.indexOnce.Do(func() {
-		peers := map[string]string{}
-		if f.Intent != nil {
-			for _, p := range f.Intent.VPCPairs {
-				peers[p.Members[0].Switch], peers[p.Members[1].Switch] = p.Members[1].Switch, p.Members[0].Switch
-			}
-		}
-		f.index = endpoint.Build([]endpoint.Region{{Name: f.Name, Switches: f.Switches, Peers: peers}})
-	})
-	return f.index
 }
 
 // Coverage is complete for a dimension only when every switch observed

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/gatework/go-netops/change"
@@ -15,6 +16,7 @@ import (
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/baseline"
 	"github.com/gatework/fabric/device"
+	"github.com/gatework/fabric/governance"
 	"github.com/gatework/fabric/internal/parallel"
 	"github.com/gatework/fabric/plan"
 	"github.com/gatework/fabric/rollout"
@@ -47,6 +49,10 @@ type PlanRequest struct {
 	// Before, when set, scopes the plan to the change from Before to the
 	// fleet's intent: drift that both intents would correct is left out.
 	Before *fabric.Intent
+	// Change is the change record bound to the bundle.
+	Change governance.Record
+	// Risk tunes classification; the zero value uses the defaults.
+	Risk governance.Policy
 }
 
 // Item is the plan for one switch.
@@ -59,6 +65,7 @@ type Item struct {
 	Review string `json:"-"`
 	// Summary counts operations by "action kind".
 	Summary map[string]int `json:"summary"`
+	Impact  plan.Impact    `json:"impact"`
 }
 
 // Refusal is a switch that could not be planned.
@@ -69,11 +76,13 @@ type Refusal struct {
 
 // Bundle is a reviewed, executable change across switches.
 type Bundle struct {
-	ID        string         `json:"id"`
-	CreatedAt time.Time      `json:"created_at"`
-	Items     []*Item        `json:"items"`
-	Waves     []rollout.Wave `json:"waves"`
-	Refused   []Refusal      `json:"refused"`
+	ID        string            `json:"id"`
+	CreatedAt time.Time         `json:"created_at"`
+	Items     []*Item           `json:"items"`
+	Waves     []rollout.Wave    `json:"waves"`
+	Refused   []Refusal         `json:"refused"`
+	Change    governance.Record `json:"change"`
+	Risk      governance.Risk   `json:"risk"`
 	// Unchanged counts switches already in the desired state.
 	Unchanged int `json:"unchanged"`
 }
@@ -117,11 +126,19 @@ func Plan(req PlanRequest) (*Bundle, error) {
 			b.Items = append(b.Items, it)
 		}
 	}
+	countEndpoints(req.Fleet, b.Items)
 	members := make([]rollout.Member, 0, len(b.Items))
 	for _, it := range b.Items {
 		members = append(members, it.Member)
 	}
-	b.Waves = rollout.Schedule(members, req.Strategy)
+	b.Change = req.Change
+	b.Risk = governance.Assess(riskItems(b.Items), riskPolicy(req.Risk))
+	strategy := req.Strategy
+	if b.Risk.Class == governance.ClassMajor {
+		// Major changes go one switch at a time behind a canary.
+		strategy.WaveSize, strategy.NoCanary = 1, false
+	}
+	b.Waves = rollout.Schedule(members, strategy)
 	if err := rollout.Validate(b.Waves); err != nil {
 		return nil, err
 	}
@@ -218,6 +235,7 @@ func newItem(r *fabric.Region, s *fabric.Switch, sw *device.Switch, ops []plan.O
 		Ops:     cs.Ops(),
 		Review:  review,
 		Summary: summary,
+		Impact:  plan.ImpactOf(cs.Ops(), sw.Config),
 	}, nil
 }
 
@@ -231,9 +249,53 @@ func bundleID(b *Bundle) (string, error) {
 		}
 		envs = append(envs, env)
 	}
-	body, err := json.Marshal(envs)
+	body, err := json.Marshal(struct {
+		Plans  []change.Envelope `json:"plans"`
+		Change governance.Record `json:"change"`
+		Risk   governance.Risk   `json:"risk"`
+	}{envs, b.Change, b.Risk})
 	if err != nil {
 		return "", fmt.Errorf("workflow: %w", err)
 	}
 	return evidence.Digest(body)[:12], nil
+}
+
+func riskPolicy(p governance.Policy) governance.Policy {
+	if p == (governance.Policy{}) {
+		return governance.DefaultPolicy()
+	}
+	return p
+}
+
+func riskItems(items []*Item) []governance.Item {
+	out := make([]governance.Item, 0, len(items))
+	for _, it := range items {
+		out = append(out, governance.Item{Switch: it.Member.Name, Region: it.Member.Region, Role: it.Member.Role, Summary: it.Summary, Impact: it.Impact})
+	}
+	return out
+}
+
+// countEndpoints fills each item's endpoint count: hosts learned locally
+// on the VLANs and ports whose existing state the item changes. It needs
+// MAC evidence; without it the count stays zero.
+func countEndpoints(f *Fleet, items []*Item) {
+	if len(items) == 0 {
+		return
+	}
+	idx := Endpoints(f)
+	for _, it := range items {
+		n := 0
+		for _, d := range it.Impact.Disruptive {
+			kind, key, _ := strings.Cut(d, ":")
+			switch kind {
+			case "vlan":
+				if v, err := fabric.ParseVLAN(key); err == nil {
+					n += idx.AttachedOn(it.Member.Name, v, "")
+				}
+			case "port":
+				n += idx.AttachedOn(it.Member.Name, 0, key)
+			}
+		}
+		it.Impact.Endpoints = n
+	}
 }

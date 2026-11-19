@@ -221,8 +221,8 @@ func dynamicNeighbor(b *device.BGP) (string, bool) {
 	return "", false
 }
 
-// pools records the smallest prefixes that hold today's addresses, so new
-// switches are numbered next to the existing ones.
+// pools records prefixes that hold today's addresses, widened to leave
+// room, so new switches are numbered next to the existing ones.
 func (a *adopter) pools(u *fabric.Underlay) {
 	r := a.rep.Region
 	var ids, vteps, anycast, links []netip.Addr
@@ -241,11 +241,24 @@ func (a *adopter) pools(u *fabric.Underlay) {
 		links = append(links, l.A.Address.Addr(), l.B.Address.Addr())
 	}
 	if !u.Pools.RouterID.IsValid() {
-		u.Pools.RouterID = fabric.PrefixOf(covering(ids))
+		u.Pools.RouterID = fabric.PrefixOf(widen(covering(ids), 24))
 	}
-	u.Pools.VTEP = fabric.PrefixOf(covering(vteps))
-	u.Pools.AnycastVTEP = fabric.PrefixOf(covering(anycast))
-	u.Pools.Links = fabric.PrefixOf(covering(links))
+	u.Pools.VTEP = fabric.PrefixOf(widen(covering(vteps), 24))
+	u.Pools.AnycastVTEP = fabric.PrefixOf(widen(covering(anycast), 24))
+	u.Pools.Links = fabric.PrefixOf(widen(covering(links), 22))
+}
+
+// widen gives a pool room to grow: at most bits long. Allocation skips
+// every address already configured, so a wider pool is safe.
+func widen(p netip.Prefix, bits int) netip.Prefix {
+	if !p.IsValid() || p.Bits() <= bits {
+		return p
+	}
+	w, err := p.Addr().Prefix(bits)
+	if err != nil {
+		return p
+	}
+	return w
 }
 
 // covering returns the longest prefix containing every address, or the

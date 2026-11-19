@@ -280,3 +280,33 @@ func (x *Index) localSites(m fabric.MAC) []string {
 	}
 	return slices.Sorted(maps.Keys(sites))
 }
+
+// DuplicateIPs finds IPs announced with more than one MAC straight from
+// the switches' MAC-IP tables, without building an index.
+func DuplicateIPs(switches []*device.Switch) map[string][]fabric.MAC {
+	byIP := map[string]fabric.MAC{}
+	out := map[string][]fabric.MAC{}
+	for _, sw := range switches {
+		for _, e := range sw.State.MACIPs {
+			if e.IP == "" {
+				continue
+			}
+			first, seen := byIP[e.IP]
+			switch {
+			case !seen:
+				byIP[e.IP] = e.MAC
+			case first != e.MAC:
+				if !slices.Contains(out[e.IP], first) {
+					out[e.IP] = append(out[e.IP], first)
+				}
+				if !slices.Contains(out[e.IP], e.MAC) {
+					out[e.IP] = append(out[e.IP], e.MAC)
+				}
+			}
+		}
+	}
+	for ip := range out {
+		slices.Sort(out[ip])
+	}
+	return out
+}

@@ -15,6 +15,7 @@ import (
 	"github.com/gatework/go-netops/session"
 
 	"github.com/gatework/fabric/device"
+	"github.com/gatework/fabric/governance"
 	"github.com/gatework/fabric/rollout"
 	"github.com/gatework/fabric/vendors/nxos"
 )
@@ -53,27 +54,39 @@ const (
 
 // SwitchResult is one switch's deployment record.
 type SwitchResult struct {
-	Switch     string       `json:"switch"`
-	Mgmt       string       `json:"mgmt"`
-	Wave       int          `json:"wave"`
-	Outcome    Outcome      `json:"outcome"`
-	Checkpoint string       `json:"checkpoint,omitempty"`
-	Lost       []string     `json:"lost,omitempty"`
-	Saved      bool         `json:"saved,omitempty"`
-	Detail     string       `json:"detail,omitempty"`
-	State      *apply.State `json:"state,omitempty"`
+	Switch     string          `json:"switch"`
+	Started    time.Time       `json:"started"`
+	Ended      time.Time       `json:"ended"`
+	Before     *rollout.Health `json:"health_before,omitempty"`
+	After      *rollout.Health `json:"health_after,omitempty"`
+	Mgmt       string          `json:"mgmt"`
+	Wave       int             `json:"wave"`
+	Outcome    Outcome         `json:"outcome"`
+	Checkpoint string          `json:"checkpoint,omitempty"`
+	Lost       []string        `json:"lost,omitempty"`
+	Saved      bool            `json:"saved,omitempty"`
+	Detail     string          `json:"detail,omitempty"`
+	State      *apply.State    `json:"state,omitempty"`
 }
 
 // DeployReport is the record of a deployment.
 type DeployReport struct {
-	Bundle  string         `json:"bundle"`
-	Results []SwitchResult `json:"results"`
+	Bundle   string              `json:"bundle"`
+	Change   governance.Record   `json:"change"`
+	Risk     governance.Risk     `json:"risk"`
+	Decision governance.Decision `json:"decision"`
+	Started  time.Time           `json:"started"`
+	Ended    time.Time           `json:"ended"`
+	Results  []SwitchResult      `json:"results"`
 	// StoppedAt is the wave whose failure stopped the rollout, or zero.
 	StoppedAt int `json:"stopped_at,omitempty"`
 }
 
-// OK reports whether every switch was verified.
+// OK reports whether the gate passed and every switch was verified.
 func (r DeployReport) OK() bool {
+	if !r.Decision.Allowed {
+		return false
+	}
 	for _, s := range r.Results {
 		if s.Outcome != OutcomeVerified {
 			return false
@@ -88,17 +101,28 @@ type DeployRequest struct {
 	Dial    Dialer
 	Journal apply.Journal
 	Save    bool
-	Now     func() time.Time
-	Logger  *slog.Logger
+	// Gate holds the operator's declarations for the change gate.
+	Gate   governance.GateOptions
+	Now    func() time.Time
+	Logger *slog.Logger
 }
 
 // Deploy executes the bundle wave by wave. Switches of a wave run
 // concurrently; after a wave with any switch not verified, every later
 // wave is skipped. Nothing is retried or rolled back automatically.
-func Deploy(ctx context.Context, req DeployRequest) DeployReport {
-	rep := DeployReport{Bundle: req.Bundle.ID}
+//
+// The change gate runs first; a refused gate contacts no device.
+func Deploy(ctx context.Context, req DeployRequest) (rep DeployReport) {
 	if req.Now == nil {
 		req.Now = time.Now
+	}
+	rep = DeployReport{Bundle: req.Bundle.ID, Change: req.Bundle.Change, Risk: req.Bundle.Risk, Started: req.Now()}
+	defer func() { rep.Ended = req.Now() }()
+	gate := req.Gate
+	gate.Now = req.Now()
+	rep.Decision, _ = governance.Gate(req.Bundle.Change, req.Bundle.Risk, gate)
+	if !rep.Decision.Allowed {
+		return rep
 	}
 	if req.Logger == nil {
 		req.Logger = slog.New(slog.DiscardHandler)
@@ -166,8 +190,9 @@ func CheckpointName(bundle string, at time.Time) string {
 	return "fabric-" + bundle + "-" + at.UTC().Format("20060102T150405")
 }
 
-func deploySwitch(ctx context.Context, req DeployRequest, it *Item) SwitchResult {
-	res := SwitchResult{Switch: it.Member.Name, Mgmt: it.Mgmt}
+func deploySwitch(ctx context.Context, req DeployRequest, it *Item) (res SwitchResult) {
+	res = SwitchResult{Switch: it.Member.Name, Mgmt: it.Mgmt, Started: req.Now()}
+	defer func() { res.Ended = req.Now() }()
 	addr, err := netip.ParseAddr(it.Mgmt)
 	if err != nil {
 		res.Outcome, res.Detail = OutcomeFailed, "invalid management address"
@@ -179,6 +204,7 @@ func deploySwitch(ctx context.Context, req DeployRequest, it *Item) SwitchResult
 		res.Outcome, res.Detail = OutcomeFailed, "pre-change health: "+session.Code(err)
 		return res
 	}
+	res.Before = &before
 	name := CheckpointName(req.Bundle.ID, req.Now())
 	cfg, err := sw.Checkpoint(ctx, name)
 	if err != nil {
@@ -201,6 +227,7 @@ func deploySwitch(ctx context.Context, req DeployRequest, it *Item) SwitchResult
 		res.Outcome, res.Detail = OutcomeDegraded, "post-change health: "+session.Code(err)
 		return res
 	}
+	res.After = &after
 	if lost := rollout.Gate(before, after); len(lost) > 0 {
 		res.Outcome, res.Lost = OutcomeDegraded, lost
 		return res
@@ -273,12 +300,34 @@ func (a planAdapter) CheckAfter(before, after *device.Config) (string, error) {
 // ErrRollback reports a rollback whose result could not be confirmed.
 var ErrRollback = errors.New("workflow: rollback not confirmed")
 
-// Rollback restores a checkpoint on one switch and returns the
-// configuration fingerprint after it.
-func Rollback(ctx context.Context, sw Switch, checkpoint string) (string, error) {
+// RollbackResult is a rollback and the health it left.
+type RollbackResult struct {
+	Fingerprint string         `json:"fingerprint"`
+	Before      rollout.Health `json:"health_before"`
+	After       rollout.Health `json:"health_after"`
+	// Lost lists what the rollback itself lost; Recovered what it brought
+	// back compared with before.
+	Lost      []string `json:"lost,omitempty"`
+	Recovered []string `json:"recovered,omitempty"`
+}
+
+// Rollback restores a checkpoint on one switch and re-checks health
+// around it, so the operator sees whether service came back.
+func Rollback(ctx context.Context, sw Switch, checkpoint string) (RollbackResult, error) {
+	var res RollbackResult
+	before, err := health(ctx, sw)
+	if err != nil {
+		return res, fmt.Errorf("%w: health before: %w", ErrRollback, err)
+	}
 	cfg, err := sw.Rollback(ctx, checkpoint)
 	if err != nil {
-		return "", fmt.Errorf("%w: %w", ErrRollback, err)
+		return res, fmt.Errorf("%w: %w", ErrRollback, err)
 	}
-	return cfg.Fingerprint, nil
+	after, err := health(ctx, sw)
+	if err != nil {
+		return res, fmt.Errorf("%w: health after: %w", ErrRollback, err)
+	}
+	res.Fingerprint, res.Before, res.After = cfg.Fingerprint, before, after
+	res.Lost, res.Recovered = rollout.Gate(before, after), rollout.Gate(after, before)
+	return res, nil
 }

@@ -31,4 +31,10 @@
 | **Allocation** | A value a request chose from a pool: VLAN, VNI, router-id, VTEP, link subnet, vPC domain, port-channel. |
 | **Delta** | The operations a request's intent change needs, without drift that predates it. |
 | **Day-0** | The complete configuration of a factory switch, rendered from its desired state. |
+| **Health score** | 0–100 per switch: 60 for control-plane ratios with known evidence, 40 for compliance minus weighted findings. |
+| **Impact** | What a plan touches: VLANs, tenants, ports, vPCs, underlay, and endpoints on objects whose state changes. |
+| **Change class** | Standard, normal or major change, derived from the impact; major needs acknowledgement. |
+| **Change record** | Ticket, requester, reason, maintenance window and expiry bound to a plan. |
+| **Gate** | The deploy-time check of the change record and class; a refused gate contacts no device. |
+| **PIR** | Post-implementation review: results, timings and health before/after per switch. |
 | **Conflict** | A disagreement between switches found while adopting; the majority becomes the draft. |
