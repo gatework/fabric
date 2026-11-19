@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"time"
 
@@ -33,8 +34,17 @@ type PlanRequest struct {
 	Region   string
 	Switches []string
 	Prune    bool
+	// Reset and Remove carry a provisioning result's targeted deletions:
+	// ports to return to factory state and retired networks or BGP
+	// neighbors, per switch.
+	Reset    map[string][]string
+	Networks map[fabric.VLAN]fabric.VNI
+	Removed  map[string][]string
 	Strategy rollout.Strategy
 	Now      time.Time
+	// Before, when set, scopes the plan to the change from Before to the
+	// fleet's intent: drift that both intents would correct is left out.
+	Before *fabric.Intent
 }
 
 // Item is the plan for one switch.
@@ -134,21 +144,44 @@ func planSwitch(req PlanRequest, sw *device.Switch) (*Item, error) {
 		return nil, fmt.Errorf("switch is not in the intent")
 	}
 	d := plan.Compile(r, s)
+	d.Reset = append(d.Reset, req.Reset[s.Name]...)
+	maps.Copy(d.Remove.Networks, req.Networks)
+	d.Remove.Neighbors = append(d.Remove.Neighbors, req.Removed[s.Name]...)
 	if req.Baseline != nil {
 		d.Merge(req.Baseline.Resolve(r.Name, s.Role).Desired(sw.Config))
 	}
 	opt := plan.Options{Prune: req.Prune}
-	ops := plan.Diff(d, sw.Config, opt)
+	ops, err := operations(req, sw, d, opt)
+	if err != nil {
+		return nil, err
+	}
 	if len(ops) == 0 {
 		return nil, errUnchanged
-	}
-	if err := plan.Converges(d, sw.Config, ops, opt); err != nil {
-		return nil, err
 	}
 	if err := plan.Safe(sw.Config, ops); err != nil {
 		return nil, err
 	}
 	return newItem(r, s, sw, ops)
+}
+
+// operations plans the full desired state, or only the change from
+// req.Before when it is set.
+func operations(req PlanRequest, sw *device.Switch, d *plan.Desired, opt plan.Options) ([]plan.Op, error) {
+	if req.Before == nil {
+		ops := plan.Diff(d, sw.Config, opt)
+		if len(ops) == 0 {
+			return nil, nil
+		}
+		return ops, plan.Converges(d, sw.Config, ops, opt)
+	}
+	before := plan.NewDesired()
+	if r, s, ok := req.Before.Locate(sw.Name); ok {
+		before = plan.Compile(r, s)
+		if req.Baseline != nil {
+			before.Merge(req.Baseline.Resolve(r.Name, s.Role).Desired(sw.Config))
+		}
+	}
+	return plan.Delta(before, d, sw.Config, opt)
 }
 
 func newItem(r *fabric.Region, s *fabric.Switch, sw *device.Switch, ops []plan.Op) (*Item, error) {

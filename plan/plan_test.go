@@ -180,3 +180,24 @@ func (fakeRenderer) Render(ops []plan.Op) ([]string, error) {
 	}
 	return out, nil
 }
+
+func TestDeltaLeavesPreexistingDrift(t *testing.T) {
+	t.Parallel()
+	cfg := base()
+	before := desired()
+	before.Settings[device.SettingTimezone] = "UTC 0 0" // drift the change must not carry
+	after := desired()
+	after.Settings[device.SettingTimezone] = "UTC 0 0"
+	after.VLANs[400] = device.VLAN{VNI: 10400}
+	after.Members[10400] = device.NVEMember{IngressBGP: true}
+	ops, err := plan.Delta(before, after, cfg, plan.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := refs(ops); got != "create vlan:400, create nve_member:10400" {
+		t.Errorf("delta = %s", got)
+	}
+	if ops, err := plan.Delta(after, after, cfg, plan.Options{}); err != nil || len(ops) != 0 {
+		t.Errorf("no change: %v %v", refs(ops), err)
+	}
+}

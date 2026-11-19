@@ -10,6 +10,7 @@ fuzz:
 	$(GO) test -run '^$$' -fuzz '^FuzzParseConfig$$' -fuzztime=10s ./vendors/nxos
 	$(GO) test -run '^$$' -fuzz '^FuzzObserve$$' -fuzztime=10s ./vendors/nxos
 	$(GO) test -run '^$$' -fuzz '^FuzzDecodeIntent$$' -fuzztime=10s .
+	$(GO) test -run '^$$' -fuzz '^FuzzSubnet$$' -fuzztime=10s ./numbering
 
 # Runs the closed loops on the private capture corpus named by
 # FABRIC_CORPUS (one directory per switch). Tests print aggregates only.

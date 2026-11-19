@@ -111,3 +111,41 @@ func diffPeers(d *Desired, cfg *device.Config, templates bool) []Op {
 	}
 	return ops
 }
+
+// diffRemovals deletes what the desired state retires explicitly.
+func diffRemovals(d *Desired, cfg *device.Config) []Op {
+	var ops []Op
+	for _, v := range sortedKeys(d.Remove.Networks) {
+		vni := d.Remove.Networks[v]
+		if _, keep := d.VLANs[v]; keep {
+			continue
+		}
+		if have, ok := cfg.VLANs[v]; ok {
+			ops = append(ops, VLANOp{VLAN: v, Have: &have})
+		}
+		if i, ok := cfg.Interfaces[v.SVI()]; ok {
+			have := sviOf(i)
+			ops = append(ops, SVIOp{VLAN: v, Have: &have})
+		}
+		if cfg.NVE != nil {
+			if have, ok := cfg.NVE.Members[vni]; ok {
+				ops = append(ops, NVEMemberOp{VNI: vni, NVE: cfg.NVE.Name, Have: &have})
+			}
+		}
+		if have, ok := cfg.EVPN[vni]; ok {
+			ops = append(ops, EVPNOp{VNI: vni, Have: &have})
+		}
+	}
+	if cfg.BGP == nil {
+		return ops
+	}
+	for _, addr := range d.Remove.Neighbors {
+		if _, keep := d.BGPNeighbors[addr]; keep {
+			continue
+		}
+		if have, ok := cfg.BGP.Neighbors[addr]; ok {
+			ops = append(ops, BGPPeerOp{Key: addr, ASN: cfg.BGP.ASN, Have: &have})
+		}
+	}
+	return ops
+}

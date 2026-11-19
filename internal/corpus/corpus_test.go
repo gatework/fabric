@@ -3,6 +3,7 @@ package corpus_test
 import (
 	"fmt"
 	"maps"
+	"net/netip"
 	"os"
 	"slices"
 	"testing"
@@ -10,8 +11,10 @@ import (
 	"github.com/gatework/go-netops/assess"
 	"github.com/gatework/go-netops/evidence"
 
+	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/internal/workflow"
 	"github.com/gatework/fabric/plan"
+	"github.com/gatework/fabric/provision"
 	"github.com/gatework/fabric/vendors/nxos"
 )
 
@@ -161,4 +164,96 @@ func TestCorpusCheck(t *testing.T) {
 	for _, k := range slices.Sorted(maps.Keys(counts)) {
 		t.Logf("  %4d %s", counts[k], k)
 	}
+}
+
+// TestCorpusProvisioning simulates day-2 work on every adopted region: a
+// new distributed gateway and a new leaf dual-homed to both spines on
+// free spine ports. Every resulting plan must converge and be safe, and
+// the new leaf's day-0 configuration must parse back to its desired state.
+func TestCorpusProvisioning(t *testing.T) {
+	f := corpus(t)
+	in, _ := workflow.Import(f)
+	f.Intent = in
+	for _, sw := range f.Switches {
+		if r, s, ok := in.Locate(sw.Name); ok {
+			sw.Region, sw.Role = r.Name, s.Role
+		}
+	}
+	obs := provision.NewObservation(f.Switches)
+	planned := 0
+	for i, r := range in.Regions {
+		tenant := r.Tenants[0].Name
+		gw := provision.AddNetwork{Region: r.Name, Name: "corpus-test", Tenant: tenant,
+			Gateway: netip.MustParsePrefix(fmt.Sprintf("198.18.%d.1/24", i))}
+		if r.Numbering.L2VNIBase == 0 {
+			gw.VNI = fabric.VNI(7_000_000 + i)
+		}
+		p, err := workflow.Provision(workflow.ProvisionRequest{Intent: in, Request: gw, Fleet: f})
+		if err != nil {
+			t.Errorf("region %d gateway: %v", i, err)
+			continue
+		}
+		planned += checkBundle(t, p)
+		vlan, vni := allocatedValue(p.Result, "vlan"), allocatedValue(p.Result, "vni")
+		if gw.VNI != 0 {
+			vni = gw.VNI.String()
+		}
+		for _, it := range p.Bundle.Items {
+			for _, op := range it.Ops {
+				// Only the new network's objects, plus overlay features or
+				// the anycast MAC on a VTEP that had no network before.
+				if k := op.Ref().Key; k != vlan && k != vni && op.Ref().Kind != plan.KindFeature && op.Ref().Kind != plan.KindSetting {
+					t.Errorf("gateway plan carries unrelated %s", op.Ref().Kind)
+				}
+			}
+		}
+		var uplinks []provision.Uplink
+		for j, sp := range r.ByRole(fabric.RoleSpine) {
+			free, err := provision.Free(in, obs, sp.Name)
+			if err != nil || len(free) == 0 {
+				t.Fatalf("region %d spine has no free port: %v", i, err)
+			}
+			uplinks = append(uplinks, provision.Uplink{Local: fmt.Sprintf("Ethernet1/%d", 49+j), Remote: sp.Name, RemotePort: free[0].Interface})
+		}
+		leaf := provision.AddSwitch{Region: r.Name, Name: fmt.Sprintf("CORPUS-LEF%02d", i), Role: fabric.RoleLeaf,
+			Mgmt: netip.MustParseAddr(fmt.Sprintf("198.19.%d.1", i)), Uplinks: uplinks}
+		p, err = workflow.Provision(workflow.ProvisionRequest{Intent: in, Request: leaf, Fleet: f})
+		if err != nil {
+			t.Errorf("region %d leaf: %v", i, err)
+			continue
+		}
+		planned += checkBundle(t, p)
+		nr, ns, _ := p.Intent.Locate(leaf.Name)
+		d := plan.Compile(nr, ns)
+		text, err := nxos.Day0(d)
+		if err != nil {
+			t.Errorf("region %d day-0: %v", i, err)
+			continue
+		}
+		cfg, _ := nxos.ParseConfig(text)
+		if rest := plan.Diff(d, cfg, plan.Options{}); len(rest) != 0 {
+			t.Errorf("region %d day-0 leaves %d operations", i, len(rest))
+		}
+	}
+	t.Logf("provisioning simulations planned %d switch changes", planned)
+}
+
+func allocatedValue(r provision.Result, what string) string {
+	for _, a := range r.Allocated {
+		if a.What == what {
+			return a.Value
+		}
+	}
+	return ""
+}
+
+func checkBundle(t *testing.T, p *workflow.Provisioned) int {
+	t.Helper()
+	if p.Bundle == nil {
+		return 0
+	}
+	for _, r := range p.Bundle.Refused {
+		t.Errorf("refused: %s", r.Reason)
+	}
+	return len(p.Bundle.Items)
 }

@@ -2,6 +2,7 @@ package fabric
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -107,6 +108,19 @@ func DecodeIntent(body []byte) (*Intent, error) {
 		return nil, err
 	}
 	return &in, nil
+}
+
+// Clone returns a deep copy.
+func (in *Intent) Clone() (*Intent, error) {
+	body, err := json.Marshal(in)
+	if err != nil {
+		return nil, fmt.Errorf("fabric: clone: %w", err)
+	}
+	var out Intent
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("fabric: clone: %w", err)
+	}
+	return &out, nil
 }
 
 // EncodeIntent renders the intent as YAML.

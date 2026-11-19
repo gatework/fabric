@@ -14,6 +14,23 @@
 | 下发 | `fabric deploy` | 默认预览；`--apply --confirm <计划ID>` 才写入。checkpoint → 逐行写入 → 回读验证 → 健康门限；任一失败停止后续批次 |
 | 回滚 | `fabric rollback` | `rollback running-config checkpoint <名> atomic` |
 
+## 日常业务（类似无线控制器的集中管理）
+
+```sh
+# 新增分布式网关：所有 VTEP 无差别下发 VLAN + L2VNI + anycast 网关，主机就近接入、本地转发
+fabric network add --intent intent.yaml --snapshot snap/ --region dc1 --name db --tenant PROD --gateway 10.10.60.1/24
+# 新 leaf 上线（自动分配 loopback、互联 /31、vPC 域），导出 day-0 配置
+fabric switch add  --intent intent.yaml --snapshot snap/ --region dc1 --name LEF31 --mgmt 10.0.0.31 --role leaf \
+                   --vpc-peer LEF30 --uplink Ethernet1/49=SPN01:Ethernet1/31 --uplink Ethernet1/50=SPN02:Ethernet1/31
+fabric switch day0 --intent intent.yaml --name LEF31 -o LEF31.cfg
+# 服务器双归 vPC 接入（po/vPC 号自动分配，所需网络自动扩展）
+fabric port free   --intent intent.yaml --snapshot snap/ --switch LEF01
+fabric port assign --intent intent.yaml --snapshot snap/ --vpc LEF01 --member LEF01:Eth1/10 --member LEF02:Eth1/10 \
+                   --profile server-trunk --description DB-01
+```
+
+每条命令：校验（意图 + 现网）→ 自动分配 → 更新意图（保留 .bak）→ 只为这次变更生成计划（不夹带存量偏差）→ `fabric deploy` 分批下发。
+
 ## 快速开始
 
 ```sh

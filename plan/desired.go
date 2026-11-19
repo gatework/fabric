@@ -48,11 +48,20 @@ type Desired struct {
 	VPC          *VPCBase
 	// Reset lists host ports (and bundles) to return to factory state.
 	Reset []string
+	// Remove names objects to delete although nothing else is pruned: a
+	// retired network's VLAN and VNI, a retired switch's BGP neighbor.
+	Remove Removal
 
 	NTPServers map[string]device.NTPServer
 	LogServers map[string]device.LogServer
 	// ExclusiveServers removes NTP and syslog servers not listed.
 	ExclusiveServers bool
+}
+
+// Removal is a targeted deletion.
+type Removal struct {
+	Networks  map[fabric.VLAN]fabric.VNI
+	Neighbors []string
 }
 
 // PortIntent is what an attachment requires of a port or bundle. Zero
@@ -86,6 +95,7 @@ func NewDesired() *Desired {
 		OSPF:         map[string]device.OSPF{},
 		BGPTemplates: map[string]device.BGPPeer{},
 		BGPNeighbors: map[string]device.BGPPeer{},
+		Remove:       Removal{Networks: map[fabric.VLAN]fabric.VNI{}},
 		NTPServers:   map[string]device.NTPServer{},
 		LogServers:   map[string]device.LogServer{},
 	}
@@ -118,6 +128,11 @@ func (d *Desired) Merge(other *Desired) {
 		d.VPC = other.VPC
 	}
 	d.Reset = append(d.Reset, other.Reset...)
+	if d.Remove.Networks == nil {
+		d.Remove.Networks = map[fabric.VLAN]fabric.VNI{}
+	}
+	maps.Copy(d.Remove.Networks, other.Remove.Networks)
+	d.Remove.Neighbors = append(d.Remove.Neighbors, other.Remove.Neighbors...)
 	if other.BGPASN != 0 {
 		d.BGPASN = other.BGPASN
 	}

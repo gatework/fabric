@@ -37,6 +37,7 @@ func Diff(d *Desired, cfg *device.Config, opt Options) []Op {
 	ops = append(ops, diffSVIs(d, cfg, opt)...)
 	ops = append(ops, diffBGPVRFs(d, cfg, opt)...)
 	ops = append(ops, diffResets(d, cfg)...)
+	ops = append(ops, diffRemovals(d, cfg)...)
 	ops = append(ops, diffPorts(d, cfg)...)
 	ops = Order(ops)
 	after := cfg

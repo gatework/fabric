@@ -58,6 +58,24 @@ Fabric rules (11): VLAN→VNI mapping consensus; per-VNI gateway and VRF consens
 
 Every rule can be disabled, re-graded or tuned with a go-netops policy file (`--policy`).
 
+## Day-2 operations (provisioning)
+
+```
+fabric network add | remove      distributed anycast gateway on every VTEP (or a subset)
+fabric tenant add                tenant VRF with allocated L3VNI and core VLAN
+fabric switch add | remove       leaf / border / spine on- and off-boarding, uplinks, vPC pairing
+fabric switch day0               full configuration for a factory switch (POAP / console)
+fabric port assign | release     port, LACP bundle or vPC bundle; profile or explicit VLANs
+fabric port free                 assignable ports, quiet ones first
+```
+
+Each command: validate against intent (+ snapshot) → allocate from region pools → write the intent (`.bak` kept) → plan only the change on the affected observed switches (ADR 0006). Underlay management and day-0 are ADR 0007; ports and vPC are ADR 0008.
+
+| Package | Role | May import |
+|---|---|---|
+| `numbering` | deterministic number and address allocation | — |
+| `provision` | typed operator requests, observation checks | fabric, device, numbering |
+
 ## Next stage (designed, not yet built)
 
 ### M5.1 Endpoint locator — `fabric locate MAC|IP`

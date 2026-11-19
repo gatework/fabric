@@ -24,4 +24,11 @@
 | **Wave** | Switches changed concurrently. Canary first, leaves (vPC peers apart), then borders and spines one at a time. |
 | **Gate** | The post-change comparison of NVE peers, EVPN sessions, OSPF adjacencies and vPC peer health. |
 | **Checkpoint** | An NX-OS configuration checkpoint taken before writing; the target of `fabric rollback`. |
+| **Underlay** | A region's routed fabric: OSPF between loopbacks over point-to-point links, iBGP EVPN with spines as route reflectors, and the pools new switches draw from. Managed only when declared. |
+| **Link** | One routed point-to-point fabric link between a VTEP and a spine, with both ends' ports and addresses. |
+| **Port profile** | A reusable host-port definition (mode, networks, MTU, edge), like an SSID profile on a wireless controller. |
+| **Request** | One typed operator task (add a gateway, add a switch, assign a port) applied to a copy of the intent. |
+| **Allocation** | A value a request chose from a pool: VLAN, VNI, router-id, VTEP, link subnet, vPC domain, port-channel. |
+| **Delta** | The operations a request's intent change needs, without drift that predates it. |
+| **Day-0** | The complete configuration of a factory switch, rendered from its desired state. |
 | **Conflict** | A disagreement between switches found while adopting; the majority becomes the draft. |
