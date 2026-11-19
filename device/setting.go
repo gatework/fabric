@@ -16,6 +16,7 @@ const Enabled = "enabled"
 
 // Managed settings.
 const (
+	SettingHostname           Setting = "hostname"
 	SettingTimezone           Setting = "timezone"
 	SettingDomainName         Setting = "domain_name"
 	SettingAnycastGatewayMAC  Setting = "anycast_gateway_mac"
@@ -43,7 +44,7 @@ const (
 // Settings lists every managed setting in rendering order.
 func Settings() []Setting {
 	return []Setting{
-		SettingTimezone, SettingDomainName, SettingAnycastGatewayMAC,
+		SettingHostname, SettingTimezone, SettingDomainName, SettingAnycastGatewayMAC,
 		SettingNTPSource, SettingNTPLogging,
 		SettingLoggingSource, SettingLoggingOrigin, SettingLoggingTimestamp,
 		SettingTACACSSource,
@@ -169,60 +170,41 @@ func vpcOption(o VPCOption) settingSpec {
 func hasNVE(c *Config) bool { return c.NVE != nil }
 func hasBGP(c *Config) bool { return c.BGP != nil }
 
-// specOf returns the binding of a managed setting. The table is built on
-// demand so that the package keeps no mutable state.
+// specOf returns the binding of a managed setting.
 func specOf(s Setting) (settingSpec, bool) {
-	var sp settingSpec
-	switch s {
-	case SettingTimezone:
-		sp = text(func(c *Config) *string { return &c.Management.Timezone })
-	case SettingDomainName:
-		sp = text(func(c *Config) *string { return &c.Management.DomainName })
-	case SettingAnycastGatewayMAC:
-		sp = settingSpec{
+	sp, ok := specs()[s]
+	return sp, ok
+}
+
+// specs builds the setting table on demand so that the package keeps no
+// mutable state.
+func specs() map[Setting]settingSpec {
+	return map[Setting]settingSpec{
+		SettingHostname:   text(func(c *Config) *string { return &c.Hostname }),
+		SettingTimezone:   text(func(c *Config) *string { return &c.Management.Timezone }),
+		SettingDomainName: text(func(c *Config) *string { return &c.Management.DomainName }),
+		SettingAnycastGatewayMAC: {
 			get: func(c *Config) string { return string(c.AnycastGatewayMAC) },
 			set: func(c *Config, v string) { c.AnycastGatewayMAC = fabric.MAC(v) },
-		}
-	case SettingNTPSource:
-		sp = text(func(c *Config) *string { return &c.Management.NTP.SourceInterface })
-	case SettingNTPLogging:
-		sp = toggle(nil, func(c *Config) *bool { return &c.Management.NTP.Logging })
-	case SettingLoggingSource:
-		sp = text(func(c *Config) *string { return &c.Management.Logging.SourceInterface })
-	case SettingLoggingOrigin:
-		sp = toggle(nil, func(c *Config) *bool { return &c.Management.Logging.OriginIDHostname })
-	case SettingLoggingTimestamp:
-		sp = text(func(c *Config) *string { return &c.Management.Logging.TimestampUnit })
-	case SettingTACACSSource:
-		sp = text(func(c *Config) *string { return &c.Management.TACACS.SourceInterface })
-	case SettingVTYExecTimeout:
-		sp = count(func(c *Config) *int { return &c.Management.VTYExecTimeout })
-	case SettingVTYSessionLimit:
-		sp = count(func(c *Config) *int { return &c.Management.VTYSessionLimit })
-	case SettingConsoleExecTimeout:
-		sp = count(func(c *Config) *int { return &c.Management.ConsoleExecTimeout })
-	case SettingNVEVirtualRMAC:
-		sp = toggle(hasNVE, func(c *Config) *bool { return &c.NVE.AdvertiseVirtualRMAC })
-	case SettingBGPAdvertisePIP:
-		sp = toggle(hasBGP, func(c *Config) *bool { return &c.BGP.AdvertisePIP })
-	case SettingBGPRetainRT:
-		sp = toggle(hasBGP, func(c *Config) *bool { return &c.BGP.RetainRouteTargetAll })
-	case SettingBGPLogNeighbor:
-		sp = toggle(hasBGP, func(c *Config) *bool { return &c.BGP.LogNeighborChanges })
-	case SettingVPCPeerSwitch:
-		sp = vpcOption(VPCPeerSwitch)
-	case SettingVPCPeerGateway:
-		sp = vpcOption(VPCPeerGateway)
-	case SettingVPCL3PeerRouter:
-		sp = vpcOption(VPCL3PeerRouter)
-	case SettingVPCAutoRecovery:
-		sp = vpcOption(VPCAutoRecovery)
-	case SettingVPCFastConvergence:
-		sp = vpcOption(VPCFastConvergence)
-	case SettingVPCARPSynchronize:
-		sp = vpcOption(VPCARPSynchronize)
-	default:
-		return settingSpec{}, false
+		},
+		SettingNTPSource:          text(func(c *Config) *string { return &c.Management.NTP.SourceInterface }),
+		SettingNTPLogging:         toggle(nil, func(c *Config) *bool { return &c.Management.NTP.Logging }),
+		SettingLoggingSource:      text(func(c *Config) *string { return &c.Management.Logging.SourceInterface }),
+		SettingLoggingOrigin:      toggle(nil, func(c *Config) *bool { return &c.Management.Logging.OriginIDHostname }),
+		SettingLoggingTimestamp:   text(func(c *Config) *string { return &c.Management.Logging.TimestampUnit }),
+		SettingTACACSSource:       text(func(c *Config) *string { return &c.Management.TACACS.SourceInterface }),
+		SettingVTYExecTimeout:     count(func(c *Config) *int { return &c.Management.VTYExecTimeout }),
+		SettingVTYSessionLimit:    count(func(c *Config) *int { return &c.Management.VTYSessionLimit }),
+		SettingConsoleExecTimeout: count(func(c *Config) *int { return &c.Management.ConsoleExecTimeout }),
+		SettingNVEVirtualRMAC:     toggle(hasNVE, func(c *Config) *bool { return &c.NVE.AdvertiseVirtualRMAC }),
+		SettingBGPAdvertisePIP:    toggle(hasBGP, func(c *Config) *bool { return &c.BGP.AdvertisePIP }),
+		SettingBGPRetainRT:        toggle(hasBGP, func(c *Config) *bool { return &c.BGP.RetainRouteTargetAll }),
+		SettingBGPLogNeighbor:     toggle(hasBGP, func(c *Config) *bool { return &c.BGP.LogNeighborChanges }),
+		SettingVPCPeerSwitch:      vpcOption(VPCPeerSwitch),
+		SettingVPCPeerGateway:     vpcOption(VPCPeerGateway),
+		SettingVPCL3PeerRouter:    vpcOption(VPCL3PeerRouter),
+		SettingVPCAutoRecovery:    vpcOption(VPCAutoRecovery),
+		SettingVPCFastConvergence: vpcOption(VPCFastConvergence),
+		SettingVPCARPSynchronize:  vpcOption(VPCARPSynchronize),
 	}
-	return sp, true
 }

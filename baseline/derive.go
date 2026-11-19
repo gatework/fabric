@@ -73,7 +73,9 @@ func deriveRegion(switches []*device.Switch) RegionProfile {
 
 // intentOwned reports settings the intent declares (per region), which a
 // baseline must not duplicate.
-func intentOwned(s device.Setting) bool { return s == device.SettingAnycastGatewayMAC }
+func intentOwned(s device.Setting) bool {
+	return s == device.SettingAnycastGatewayMAC || s == device.SettingHostname
+}
 
 // majority returns the value held by more than half of vals.
 func majority[V comparable](vals []V) (V, bool) {

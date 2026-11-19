@@ -205,7 +205,10 @@ func (p *configParser) evpn(n *node) {
 }
 
 func (p *configParser) vpc(n *node) {
-	d := &device.VPCDomain{ID: atoi(n.arg(2))}
+	d := p.cfg.VPC
+	if d == nil || d.ID != atoi(n.arg(2)) {
+		d = &device.VPCDomain{ID: atoi(n.arg(2))}
+	}
 	for _, c := range n.children {
 		switch {
 		case c.has("role", "priority"):
@@ -216,6 +219,8 @@ func (p *configParser) vpc(n *node) {
 			d.KeepaliveVRF = after(c.fields, "vrf")
 		case c.has("virtual", "peer-link"):
 			d.VirtualPeerLink = after(c.fields, "destination")
+			d.VirtualPeerLinkSource = after(c.fields, "source")
+			d.VirtualPeerLinkDSCP = atoi(after(c.fields, "dscp"))
 		case c.has("delay", "restore") && len(c.fields) == 3:
 			d.DelayRestore = atoi(c.arg(2))
 		default:

@@ -60,7 +60,20 @@ func RenderConfig(ops []plan.Op) (string, error) {
 		return "", err
 	}
 	var b strings.Builder
-	for _, l := range s.lines {
+	top := ""
+	for i, l := range s.lines {
+		// Consecutive blocks under the same top-level context (several
+		// EVPN instances, several BGP neighbors) read as one block.
+		if l.depth == 0 {
+			opens := i+1 < len(s.lines) && s.lines[i+1].depth > 0
+			if opens && l.text == top {
+				continue
+			}
+			top = ""
+			if opens {
+				top = l.text
+			}
+		}
 		_, _ = b.WriteString(strings.Repeat("  ", l.depth))
 		_, _ = b.WriteString(l.text)
 		_ = b.WriteByte('\n')
@@ -102,6 +115,20 @@ func renderOp(s *script, op plan.Op) error {
 		renderBGPVRF(s, o)
 	case plan.PortOp:
 		renderPort(s, o)
+	case plan.InterfaceOp:
+		renderInterface(s, o)
+	case plan.OSPFOp:
+		renderOSPF(s, o)
+	case plan.BGPOp:
+		renderBGP(s, o)
+	case plan.BGPPeerOp:
+		renderPeer(s, o)
+	case plan.NVEOp:
+		renderNVE(s, o)
+	case plan.VPCDomainOp:
+		renderVPCDomain(s, o)
+	case plan.ResetOp:
+		renderReset(s, o)
 	default:
 		return fmt.Errorf("%w: %T", ErrUnrenderable, op)
 	}
@@ -167,6 +194,8 @@ func settingSyntax(st device.Setting) syntax {
 		return syntax{context: "vpc domain %s", cmd: string(opt)}
 	}
 	switch st {
+	case device.SettingHostname:
+		return syntax{cmd: "hostname"}
 	case device.SettingTimezone:
 		return syntax{cmd: "clock timezone", negateValue: true}
 	case device.SettingDomainName:
@@ -512,11 +541,17 @@ func renderBGPVRF(s *script, o plan.BGPVRFOp) {
 }
 
 func renderPort(s *script, o plan.PortOp) {
+	_, kind := device.CanonicalInterface(o.Interface)
+	if o.Want == nil && kind == device.KindPortChannel && o.Have != nil {
+		s.add(0, "no interface %s", o.Interface)
+		return
+	}
 	s.add(0, "interface %s", o.Interface)
 	if o.Want == nil {
 		s.add(1, "no switchport")
 		return
 	}
+	defer renderPortExtras(s, o)
 	w := *o.Want
 	if o.Have == nil {
 		s.add(1, "switchport")
@@ -561,4 +596,65 @@ func allowedText(s *set.Set[uint16]) string {
 		return "none"
 	}
 	return s.Compact()
+}
+
+// renderPortExtras renders the attributes beyond VLAN membership, in the
+// order NX-OS needs: bundle membership after the switchport settings,
+// the administrative state last.
+func renderPortExtras(s *script, o plan.PortOp) {
+	var have plan.Port
+	if o.Have != nil {
+		have = *o.Have
+	}
+	w := *o.Want
+	text := func(old, cur, cmd string) {
+		switch cur {
+		case old:
+		case "":
+			s.add(1, "no %s", cmd)
+		default:
+			s.add(1, "%s %s", cmd, cur)
+		}
+	}
+	text(have.Description, w.Description, "description")
+	if w.MTU != have.MTU {
+		if w.MTU == 0 {
+			s.add(1, "no mtu")
+		} else {
+			s.add(1, "mtu %d", w.MTU)
+		}
+	}
+	text(have.STPPortType, w.STPPortType, "spanning-tree port type")
+	toggle(s, 1, have.PeerLink, w.PeerLink, "vpc peer-link")
+	if w.VPC != have.VPC {
+		if w.VPC == 0 {
+			s.add(1, "no vpc %d", have.VPC)
+		} else {
+			s.add(1, "vpc %d", w.VPC)
+		}
+	}
+	if w.ChannelGroup != have.ChannelGroup || w.ChannelMode != have.ChannelMode {
+		switch {
+		case w.ChannelGroup == 0:
+			s.add(1, "no channel-group")
+		case w.ChannelMode != "":
+			s.add(1, "channel-group %d mode %s", w.ChannelGroup, w.ChannelMode)
+		default:
+			s.add(1, "channel-group %d", w.ChannelGroup)
+		}
+	}
+	renderAdmin(s, have.Admin, w.Admin)
+}
+
+func renderAdmin(s *script, have, want device.AdminState) {
+	if want == have {
+		return
+	}
+	switch want {
+	case device.AdminUp:
+		s.add(1, "no shutdown")
+	case device.AdminDown:
+		s.add(1, "shutdown")
+	case device.AdminDefault:
+	}
 }

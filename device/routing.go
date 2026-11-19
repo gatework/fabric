@@ -98,13 +98,17 @@ type VPCDomain struct {
 	KeepaliveSource string `json:"keepalive_source,omitempty"`
 	KeepaliveVRF    string `json:"keepalive_vrf,omitempty"`
 	VirtualPeerLink string `json:"virtual_peer_link_destination,omitempty"`
-	PeerSwitch      bool   `json:"peer_switch,omitempty"`
-	PeerGateway     bool   `json:"peer_gateway,omitempty"`
-	L3PeerRouter    bool   `json:"layer3_peer_router,omitempty"`
-	AutoRecovery    bool   `json:"auto_recovery,omitempty"`
-	FastConvergence bool   `json:"fast_convergence,omitempty"`
-	ARPSynchronize  bool   `json:"ip_arp_synchronize,omitempty"`
-	DelayRestore    int    `json:"delay_restore,omitempty"`
+	// VirtualPeerLinkSource and VirtualPeerLinkDSCP complete the virtual
+	// peer-link statement.
+	VirtualPeerLinkSource string `json:"virtual_peer_link_source,omitempty"`
+	VirtualPeerLinkDSCP   int    `json:"virtual_peer_link_dscp,omitempty"`
+	PeerSwitch            bool   `json:"peer_switch,omitempty"`
+	PeerGateway           bool   `json:"peer_gateway,omitempty"`
+	L3PeerRouter          bool   `json:"layer3_peer_router,omitempty"`
+	AutoRecovery          bool   `json:"auto_recovery,omitempty"`
+	FastConvergence       bool   `json:"fast_convergence,omitempty"`
+	ARPSynchronize        bool   `json:"ip_arp_synchronize,omitempty"`
+	DelayRestore          int    `json:"delay_restore,omitempty"`
 }
 
 // VPCOption names a boolean vPC domain option as configured.

@@ -62,6 +62,17 @@ func TestCorpusAdoptPlanLoop(t *testing.T) {
 			sw.Region, sw.Role = r.Name, s.Role
 		}
 	}
+	links, managed := 0, 0
+	for _, r := range in.Regions {
+		links += len(r.Links)
+		if r.Underlay != nil {
+			managed++
+		}
+	}
+	t.Logf("regions with a managed underlay %d of %d, fabric links %d", managed, len(in.Regions), links)
+	if managed != len(in.Regions) {
+		t.Error("some region's underlay could not be adopted")
+	}
 	kinds := map[string]int{}
 	noop := 0
 	for _, sw := range f.Switches {
@@ -83,6 +94,10 @@ func TestCorpusAdoptPlanLoop(t *testing.T) {
 		}
 		for _, op := range ops {
 			kinds[op.Action().String()+" "+string(op.Ref().Kind)]++
+			// Adopting an underlay must never rewrite it.
+			if slices.Contains(underlayKinds, op.Ref().Kind) {
+				t.Errorf("adopted underlay plans %s %s", op.Action(), op.Ref().Kind)
+			}
 		}
 	}
 	t.Logf("regions %d, conflicts %d, switches already conforming %d of %d", len(in.Regions), len(conflicts), noop, len(f.Switches))
@@ -90,6 +105,8 @@ func TestCorpusAdoptPlanLoop(t *testing.T) {
 		t.Logf("  %4d %s", kinds[k], k)
 	}
 }
+
+var underlayKinds = []plan.Kind{plan.KindInterface, plan.KindOSPF, plan.KindBGPTemplate, plan.KindBGPNeighbor, plan.KindNVE, plan.KindVPCDomain}
 
 // TestCorpusBaselineLoop derives a baseline, plans its remediation, and
 // requires the simulated result to satisfy the baseline.

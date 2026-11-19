@@ -42,7 +42,7 @@ func fleet(tb testing.TB) *workflow.Fleet {
 	r := in.Regions[0]
 	for _, name := range []string{"DC1-LEF01", "DC1-LEF02"} {
 		s, _ := r.Switch(name)
-		sw := nxos.Assemble(device.Identity{Name: s.Name, Mgmt: s.Mgmt, Region: r.Name, Role: s.Role},
+		sw := nxos.Assemble(device.Identity{Name: s.Name, Mgmt: s.Mgmt.Addr, Region: r.Name, Role: s.Role},
 			map[string]string{"show running-config": cfgText})
 		f.Switches = append(f.Switches, sw)
 	}

@@ -85,11 +85,18 @@ func (c *Changeset) Render() (change.Script, error) {
 	return change.Script{Commands: cmds, Rollback: rollback}, nil
 }
 
-// Eligible requires every target object to still be in its planned state.
+// Eligible requires every target object to still be in its planned
+// state. Operations are checked in order against the configuration the
+// earlier operations leave, because later ones may depend on objects the
+// earlier ones create.
 func (c *Changeset) Eligible(cfg *device.Config) error {
 	var errs []error
+	sim := cfg.Clone()
 	for _, op := range c.ops {
-		if err := op.Current(cfg); err != nil {
+		if err := op.Current(sim); err != nil {
+			errs = append(errs, err)
+		}
+		if err := op.Apply(sim); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -181,8 +188,22 @@ func decodeOp(w wireOp) (Op, error) {
 		op, err = decodeAs[SVIOp](w.Op)
 	case KindBGPVRF:
 		op, err = decodeAs[BGPVRFOp](w.Op)
-	case KindPort:
+	case KindPort, KindPortChannel:
 		op, err = decodeAs[PortOp](w.Op)
+	case KindInterface:
+		op, err = decodeAs[InterfaceOp](w.Op)
+	case KindOSPF:
+		op, err = decodeAs[OSPFOp](w.Op)
+	case KindBGP:
+		op, err = decodeAs[BGPOp](w.Op)
+	case KindBGPTemplate, KindBGPNeighbor:
+		op, err = decodeAs[BGPPeerOp](w.Op)
+	case KindNVE:
+		op, err = decodeAs[NVEOp](w.Op)
+	case KindVPCDomain:
+		op, err = decodeAs[VPCDomainOp](w.Op)
+	case KindInterfaceRst:
+		op, err = decodeAs[ResetOp](w.Op)
 	default:
 		return nil, fmt.Errorf("plan: unknown operation kind %q", w.Kind)
 	}

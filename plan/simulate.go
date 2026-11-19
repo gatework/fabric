@@ -91,8 +91,12 @@ func mask(cfg *device.Config, ops []Op) *device.Config {
 			if m.BGP != nil {
 				delete(m.BGP.VRFs, ref.Key)
 			}
-		case KindPort:
+		case KindPort, KindPortChannel, KindInterface, KindInterfaceRst:
 			delete(m.Interfaces, ref.Key)
+		case KindOSPF:
+			delete(m.OSPF, ref.Key)
+		case KindBGP, KindNVE, KindBGPTemplate, KindBGPNeighbor, KindVPCDomain:
+			maskUnderlay(m, op)
 		}
 	}
 	return m
@@ -108,4 +112,44 @@ func firstDifference(a, b *device.Config) string {
 		}
 	}
 	return "unknown"
+}
+
+// maskUnderlay removes singleton objects an operation creates, or the
+// fields it manages on them.
+func maskUnderlay(m *device.Config, op Op) {
+	switch o := op.(type) {
+	case BGPOp:
+		if o.Have == nil {
+			m.BGP = nil
+		} else if m.BGP != nil {
+			b := *m.BGP
+			b.RouterID = ""
+			m.BGP = &b
+		}
+	case BGPPeerOp:
+		if m.BGP != nil {
+			if o.Template {
+				delete(m.BGP.Templates, o.Key)
+			} else {
+				delete(m.BGP.Neighbors, o.Key)
+			}
+		}
+	case NVEOp:
+		if o.Have == nil {
+			m.NVE = nil
+		} else if m.NVE != nil {
+			n := *m.NVE
+			n.Name, n.Shutdown, n.SourceInterface, n.HostReachabilityBGP = "", false, "", false
+			m.NVE = &n
+		}
+	case VPCDomainOp:
+		if o.Have == nil {
+			m.VPC = nil
+		} else if m.VPC != nil {
+			d := *m.VPC
+			d.ID, d.KeepaliveDest, d.KeepaliveSource = 0, "", ""
+			d.VirtualPeerLink, d.VirtualPeerLinkSource, d.VirtualPeerLinkDSCP = "", "", 0
+			m.VPC = &d
+		}
+	}
 }

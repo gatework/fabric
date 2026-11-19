@@ -43,7 +43,7 @@ func TestAdoptRoundTripPlansNothing(t *testing.T) {
 		t.Fatalf("conflicts = %+v", rep.Conflicts)
 	}
 	l1, _ := r.Switch("L1")
-	if l1.Role != fabric.RoleLeaf || l1.VPCPeer != "L2" {
+	if peer, _ := r.Peer("L1"); l1.Role != fabric.RoleLeaf || peer != "L2" || r.VPCPairs[0].Domain != 10 || r.VPCPairs[0].AnycastVTEP.String() != "10.0.1.100" {
 		t.Errorf("L1 = %+v", l1)
 	}
 	if r.Fabric.ASN != 65001 || r.Fabric.AnycastGatewayMAC != "0000.2222.3333" || r.Fabric.SVIMTU != 9216 || r.Fabric.SuppressARP {

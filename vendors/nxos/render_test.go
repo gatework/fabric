@@ -34,7 +34,7 @@ func TestRenderParsesBack(t *testing.T) {
 	t.Parallel()
 	r := intentRegion(t)
 	sw, _ := r.Switch("DC1-LEF01")
-	base := "interface Ethernet1/3\n  no shutdown\ninterface port-channel10\n  switchport\n  switchport mode trunk\n  switchport trunk allowed vlan 1\n" +
+	base := "interface Ethernet1/3\n  no shutdown\ninterface Ethernet1/20\ninterface Ethernet1/49\ninterface port-channel10\n  switchport\n  switchport mode trunk\n  switchport trunk allowed vlan 1\n" +
 		"interface nve1\n  host-reachability protocol bgp\nrouter bgp 65001\n"
 	cfg, err := nxos.ParseConfig(base)
 	if err != nil {
@@ -75,7 +75,8 @@ func TestRenderAdoptedLeafIsNoop(t *testing.T) {
 	}
 	want := []string{
 		"create vlan:300", "create evpn:10300", "update nve_member:10200",
-		"create nve_member:10300", "create svi:300", "create port:Ethernet1/3", "update port:port-channel10",
+		"create nve_member:10300", "create svi:300", "create port:Ethernet1/3", "update port_channel:port-channel10",
+		"create port:Ethernet1/20", "create port_channel:port-channel20",
 	}
 	slices.Sort(refs)
 	slices.Sort(want)

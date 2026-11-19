@@ -9,11 +9,37 @@ regions:
       suppress_arp: true
     numbering:
       l2vni_base: 10000
+    underlay:
+      ospf_process: "10"
+      ospf_area: 0.0.0.0
+      mtu: 9216
+      link_prefix: 30
+      bgp:
+        neighbors: dynamic
+        vtep_template: SPINES
+        spine_template: VTEPS
+      pools:
+        router_id: 10.0.0.0/24
+        vtep: 10.0.1.0/24
+        anycast_vtep: 10.0.1.0/24
+        links: 10.1.0.0/16
+        vpc_domains: 1-999
+        port_channels: 1-4000
     switches:
-      - {name: DC1-SPN01, mgmt: 198.51.100.1, role: spine}
-      - {name: DC1-LEF01, mgmt: 198.51.100.11, role: leaf, vpc_peer: DC1-LEF02}
-      - {name: DC1-LEF02, mgmt: 198.51.100.12, role: leaf, vpc_peer: DC1-LEF01}
-      - {name: DC1-BDR01, mgmt: 198.51.100.21, role: border}
+      - {name: DC1-SPN01, mgmt: 198.51.100.1, role: spine, router_id: 10.0.0.1}
+      - {name: DC1-LEF01, mgmt: 198.51.100.11, role: leaf, router_id: 10.0.0.11, vtep: 10.0.1.11}
+      - {name: DC1-LEF02, mgmt: 198.51.100.12, role: leaf, router_id: 10.0.0.12, vtep: 10.0.1.12}
+      - {name: DC1-BDR01, mgmt: 198.51.100.21, role: border, router_id: 10.0.0.21, vtep: 10.0.1.21}
+    vpc_pairs:
+      - domain: 10
+        anycast_vtep: 10.0.1.100
+        peer_link: virtual
+        members:
+          - {switch: DC1-LEF01, keepalive: 198.51.100.11}
+          - {switch: DC1-LEF02, keepalive: 198.51.100.12}
+    links:
+      - a: {switch: DC1-LEF01, interface: Ethernet1/49, address: 10.1.0.1/30}
+        b: {switch: DC1-SPN01, interface: Ethernet1/1, address: 10.1.0.2/30}
     tenants:
       - {name: PROD, l3vni: 50000, vlan: 999}
     networks:
@@ -21,6 +47,17 @@ regions:
       - {vlan: 101, tenant: PROD, gateway: 10.10.101.1/24}
       - {name: l2only, vlan: 200, switches: [DC1-LEF01, DC1-LEF02]}
       - {name: app, vlan: 300, tenant: PROD, gateway: 10.10.44.1/24}
+    port_profiles:
+      - {name: server-trunk, mode: trunk, networks: [100, 101, 300], mtu: 9216, edge: true}
+      - {name: app-access, mode: access, networks: [300]}
     attachments:
-      - {switch: DC1-LEF01, interface: Ethernet1/3, mode: access, networks: [300]}
+      - {switch: DC1-LEF01, interface: Ethernet1/3, profile: app-access}
       - {switch: DC1-LEF01, interface: port-channel10, mode: trunk, networks: [100, 101, 300]}
+      - kind: vpc
+        switch: DC1-LEF01
+        port_channel: 20
+        profile: server-trunk
+        description: DB-01
+        members:
+          DC1-LEF01: [Ethernet1/20]
+          DC1-LEF02: [Ethernet1/20]

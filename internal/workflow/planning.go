@@ -168,8 +168,9 @@ func newItem(r *fabric.Region, s *fabric.Switch, sw *device.Switch, ops []plan.O
 	for _, op := range ops {
 		summary[op.Action().String()+" "+string(op.Ref().Kind)]++
 	}
+	peer, _ := r.Peer(s.Name)
 	return &Item{
-		Member:  rollout.Member{Name: s.Name, Region: r.Name, Role: s.Role, VPCPeer: s.VPCPeer},
+		Member:  rollout.Member{Name: s.Name, Region: r.Name, Role: s.Role, VPCPeer: peer},
 		Mgmt:    sw.Mgmt.String(),
 		Plan:    p,
 		Ops:     cs.Ops(),

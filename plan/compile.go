@@ -1,8 +1,6 @@
 package plan
 
 import (
-	"slices"
-
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/device"
 )
@@ -12,14 +10,24 @@ func overlayFeatures() []string {
 	return []string{"bgp", "interface-vlan", "vn-segment-vlan-based", "nv overlay", "nv overlay evpn"}
 }
 
-// Compile returns the desired overlay state of one switch of the region:
-// its tenants, networks and attachments. Spines get an empty state.
+// Compile returns the desired state of one switch of the region: its
+// underlay and control plane when the region manages them, and on VTEPs
+// its tenants, networks and attachments.
 func Compile(r *fabric.Region, sw *fabric.Switch) *Desired {
 	d := NewDesired()
+	d.BGPASN = r.Fabric.ASN
+	if r.Underlay != nil {
+		compileUnderlay(d, r, sw)
+	}
 	if !sw.Role.VTEP() {
 		return d
 	}
-	d.BGPASN = r.Fabric.ASN
+	compileServices(d, r, sw)
+	compileAccess(d, r, sw)
+	return d
+}
+
+func compileServices(d *Desired, r *fabric.Region, sw *fabric.Switch) {
 	for _, t := range r.Tenants {
 		if r.Hosts(t, sw) {
 			compileTenant(d, r, t)
@@ -30,12 +38,6 @@ func Compile(r *fabric.Region, sw *fabric.Switch) *Desired {
 			compileNetwork(d, r, n)
 		}
 	}
-	for _, a := range r.Attachments {
-		if a.Switch == sw.Name {
-			name, _ := device.CanonicalInterface(a.Interface)
-			d.Ports[name] = PortIntent{Mode: a.Mode, VLANs: slices.Clone(a.Networks)}
-		}
-	}
 	if len(d.VLANs) > 0 {
 		for _, f := range overlayFeatures() {
 			d.Features[f] = true
@@ -44,7 +46,6 @@ func Compile(r *fabric.Region, sw *fabric.Switch) *Desired {
 			d.Settings[device.SettingAnycastGatewayMAC] = string(r.Fabric.AnycastGatewayMAC)
 		}
 	}
-	return d
 }
 
 func compileTenant(d *Desired, r *fabric.Region, t *fabric.Tenant) {
@@ -70,7 +71,7 @@ func compileNetwork(d *Desired, r *fabric.Region, n *fabric.Network) {
 	if n.Gateway.IsValid() {
 		d.SVIs[n.VLAN] = SVI{
 			Admin: device.AdminUp, MTU: r.Fabric.SVIMTU, VRF: n.Tenant,
-			Address: n.Gateway, Anycast: true, ACLIn: n.ACLIn,
+			Address: n.Gateway.Prefix, Anycast: true, ACLIn: n.ACLIn,
 		}
 	}
 }

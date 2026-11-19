@@ -137,7 +137,7 @@ func collectTargets(intentPath string, hosts []string) ([]netip.Addr, error) {
 	if in != nil {
 		for _, r := range in.Regions {
 			for _, s := range r.Switches {
-				out = append(out, s.Mgmt)
+				out = append(out, s.Mgmt.Addr)
 			}
 		}
 	}

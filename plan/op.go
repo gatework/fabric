@@ -43,9 +43,12 @@ const (
 )
 
 // Kinds lists every kind in creation order; deletion runs in reverse.
+// Settings come late because many live on objects created before them
+// (BGP options, vPC options, NVE options).
 func Kinds() []Kind {
-	return []Kind{KindFeature, KindSetting, KindNTPServer, KindLogServer, KindVRF, KindVLAN,
-		KindEVPN, KindNVEMember, KindSVI, KindBGPVRF, KindPort}
+	return []Kind{KindFeature, KindNTPServer, KindLogServer, KindOSPF, KindBGP, KindVRF, KindVLAN,
+		KindEVPN, KindInterface, KindNVE, KindNVEMember, KindSVI, KindBGPTemplate, KindBGPNeighbor,
+		KindBGPVRF, KindVPCDomain, KindSetting, KindInterfaceRst, KindPortChannel, KindPort}
 }
 
 func (k Kind) rank() int { return slices.Index(Kinds(), k) }
@@ -626,16 +629,25 @@ func (o BGPVRFOp) Holds(cfg *device.Config) error {
 	return holds(o.Ref(), ok && reflect.DeepEqual(got, *o.Want))
 }
 
-// Port is the managed part of a host-facing layer-2 port.
+// Port is the managed part of a host-facing layer-2 port or bundle.
 type Port struct {
 	Mode   fabric.PortMode `json:"mode"`
 	Access fabric.VLAN     `json:"access,omitempty"`
 	// Allowed is the trunk allowed list; nil means all VLANs.
-	Allowed *set.Set[uint16] `json:"allowed,omitempty"`
+	Allowed      *set.Set[uint16]  `json:"allowed,omitempty"`
+	Admin        device.AdminState `json:"admin,omitempty"`
+	Description  string            `json:"description,omitempty"`
+	MTU          int               `json:"mtu,omitempty"`
+	STPPortType  string            `json:"stp_port_type,omitempty"`
+	ChannelGroup int               `json:"channel_group,omitempty"`
+	ChannelMode  string            `json:"channel_mode,omitempty"`
+	VPC          int               `json:"vpc,omitempty"`
+	PeerLink     bool              `json:"peer_link,omitempty"`
 }
 
 func portOf(i device.Interface) Port {
-	p := Port{Mode: i.Mode, Access: i.AccessVLAN}
+	p := Port{Mode: i.Mode, Access: i.AccessVLAN, Admin: i.Admin, Description: i.Description, MTU: i.MTU,
+		STPPortType: i.STPPortType, ChannelGroup: i.ChannelGroup, ChannelMode: i.ChannelMode, VPC: i.VPC, PeerLink: i.PeerLink}
 	if i.Mode == fabric.PortTrunk {
 		p.Access = 0
 		if i.TrunkAllowed != nil {
@@ -643,6 +655,19 @@ func portOf(i device.Interface) Port {
 		}
 	}
 	return p
+}
+
+func applyPort(i *device.Interface, p Port) {
+	i.Layer2, i.Mode = true, p.Mode
+	if p.Mode == fabric.PortAccess {
+		i.AccessVLAN = p.Access
+	} else if p.Allowed != nil {
+		i.TrunkAllowed = p.Allowed.Clone()
+	} else {
+		i.TrunkAllowed = nil
+	}
+	i.Admin, i.Description, i.MTU, i.STPPortType = p.Admin, p.Description, p.MTU, p.STPPortType
+	i.ChannelGroup, i.ChannelMode, i.VPC, i.PeerLink = p.ChannelGroup, p.ChannelMode, p.VPC, p.PeerLink
 }
 
 // PortOp changes how an interface carries networks. Have nil means the
@@ -655,7 +680,12 @@ type PortOp struct {
 }
 
 // Ref identifies the object.
-func (o PortOp) Ref() Ref { return Ref{KindPort, o.Interface} }
+func (o PortOp) Ref() Ref {
+	if _, kind := device.CanonicalInterface(o.Interface); kind == device.KindPortChannel {
+		return Ref{KindPortChannel, o.Interface}
+	}
+	return Ref{KindPort, o.Interface}
+}
 
 // Action reports what the operation does.
 func (o PortOp) Action() Action {
@@ -668,23 +698,25 @@ func (o PortOp) Action() Action {
 // Apply changes the model as the rendered commands change the device.
 func (o PortOp) Apply(cfg *device.Config) error {
 	i, ok := cfg.Interfaces[o.Interface]
-	if !ok {
+	name, kind := device.CanonicalInterface(o.Interface)
+	switch {
+	case ok:
+		i = cloneInterface(i)
+	case kind == device.KindPortChannel && o.Want != nil:
+		i = device.Interface{Name: name, Kind: kind}
+	default:
 		return fmt.Errorf("%w: interface %s", ErrPrerequisite, o.Interface)
 	}
-	i = cloneInterface(i)
 	if o.Want == nil {
+		if kind == device.KindPortChannel && o.Have != nil {
+			delete(cfg.Interfaces, o.Interface)
+			return nil
+		}
 		i.Layer2, i.Mode, i.AccessVLAN, i.TrunkAllowed = false, fabric.PortAccess, 0, nil
 		cfg.Interfaces[o.Interface] = i
 		return nil
 	}
-	i.Layer2, i.Mode = true, o.Want.Mode
-	if o.Want.Mode == fabric.PortAccess {
-		i.AccessVLAN = o.Want.Access
-	} else if o.Want.Allowed != nil {
-		i.TrunkAllowed = o.Want.Allowed.Clone()
-	} else {
-		i.TrunkAllowed = nil
-	}
+	applyPort(&i, *o.Want)
 	cfg.Interfaces[o.Interface] = i
 	return nil
 }
@@ -696,6 +728,9 @@ func (o PortOp) Invert() Op { return PortOp{Interface: o.Interface, Have: o.Want
 func (o PortOp) Current(cfg *device.Config) error {
 	i, ok := cfg.Interfaces[o.Interface]
 	if !ok {
+		if _, kind := device.CanonicalInterface(o.Interface); kind == device.KindPortChannel && o.Have == nil {
+			return nil
+		}
 		return fmt.Errorf("%w: interface %s", ErrPrerequisite, o.Interface)
 	}
 	if o.Have == nil {
@@ -704,7 +739,9 @@ func (o PortOp) Current(cfg *device.Config) error {
 	return holds(o.Ref(), i.Layer2 && portEqual(portOf(i), *o.Have))
 }
 func portEqual(a, b Port) bool {
-	if a.Mode != b.Mode || a.Access != b.Access {
+	x, y := a, b
+	x.Allowed, y.Allowed = nil, nil
+	if x != y {
 		return false
 	}
 	if a.Allowed == nil || b.Allowed == nil {

@@ -112,7 +112,7 @@ func (f *Fleet) identify(bits int) {
 func (f *Fleet) locate(mgmt netip.Addr) (*fabric.Region, *fabric.Switch, bool) {
 	for _, r := range f.Intent.Regions {
 		for _, s := range r.Switches {
-			if s.Mgmt == mgmt {
+			if s.Mgmt.Addr == mgmt {
 				return r, s, true
 			}
 		}

@@ -1,6 +1,8 @@
 package nxos
 
 import (
+	"slices"
+
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/device"
 )
@@ -11,11 +13,16 @@ func (p *configParser) bgp(n *node) {
 		p.unparsed(n)
 		return
 	}
-	b := &device.BGP{
-		ASN:       asn,
-		Templates: map[string]device.BGPPeer{},
-		Neighbors: map[string]device.BGPPeer{},
-		VRFs:      map[string]device.BGPVRF{},
+	// A repeated block (incremental scripts read back as configuration)
+	// continues the same process.
+	b := p.cfg.BGP
+	if b == nil || b.ASN != asn {
+		b = &device.BGP{
+			ASN:       asn,
+			Templates: map[string]device.BGPPeer{},
+			Neighbors: map[string]device.BGPPeer{},
+			VRFs:      map[string]device.BGPVRF{},
+		}
 	}
 	for _, c := range n.children {
 		switch {
@@ -39,18 +46,17 @@ func (p *configParser) bgp(n *node) {
 				}
 			}
 		case c.has("template", "peer"):
-			b.Templates[c.arg(2)] = bgpPeer(c)
+			b.Templates[c.arg(2)] = bgpPeer(b.Templates[c.arg(2)], c)
 		case c.has("neighbor"):
-			b.Neighbors[c.arg(1)] = bgpPeer(c)
+			b.Neighbors[c.arg(1)] = bgpPeer(b.Neighbors[c.arg(1)], c)
 		case c.has("vrf"):
-			b.VRFs[c.arg(1)] = bgpVRF(c)
+			b.VRFs[c.arg(1)] = bgpVRF(b.VRFs[c.arg(1)], c)
 		}
 	}
 	p.cfg.BGP = b
 }
 
-func bgpPeer(n *node) device.BGPPeer {
-	var peer device.BGPPeer
+func bgpPeer(peer device.BGPPeer, n *node) device.BGPPeer {
 	if as := after(n.fields, "remote-as"); as != "" {
 		peer.RemoteAS, _ = fabric.ParseASN(as)
 	}
@@ -71,7 +77,9 @@ func bgpPeer(n *node) device.BGPPeer {
 		case c.has("password"):
 			peer.KeyDigest = digest(c.rest(1))
 		case c.has("address-family"):
-			peer.Families = append(peer.Families, c.rest(1))
+			if !slices.Contains(peer.Families, c.rest(1)) {
+				peer.Families = append(peer.Families, c.rest(1))
+			}
 			for _, o := range c.children {
 				switch {
 				case o.has("route-reflector-client"):
@@ -85,15 +93,14 @@ func bgpPeer(n *node) device.BGPPeer {
 	return peer
 }
 
-func bgpVRF(n *node) device.BGPVRF {
-	v := device.BGPVRF{}
+func bgpVRF(v device.BGPVRF, n *node) device.BGPVRF {
 	for _, c := range n.children {
 		switch {
 		case c.has("neighbor"):
 			if v.Neighbors == nil {
 				v.Neighbors = map[string]device.BGPPeer{}
 			}
-			v.Neighbors[c.arg(1)] = bgpPeer(c)
+			v.Neighbors[c.arg(1)] = bgpPeer(v.Neighbors[c.arg(1)], c)
 		case c.has("address-family", "ipv4", "unicast"):
 			for _, o := range c.children {
 				switch {
@@ -118,7 +125,7 @@ func bgpVRF(n *node) device.BGPVRF {
 }
 
 func (p *configParser) ospf(n *node) {
-	o := device.OSPF{}
+	o := p.cfg.OSPF[n.arg(2)]
 	for _, c := range n.children {
 		switch {
 		case c.has("router-id"):

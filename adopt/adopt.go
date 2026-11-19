@@ -6,6 +6,7 @@ import (
 	"maps"
 	"net/netip"
 	"slices"
+	"strings"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/device"
@@ -41,6 +42,7 @@ func Region(name string, switches []*device.Switch) *Report {
 	}
 	slices.SortFunc(a.switches, func(x, y *device.Switch) int { return cmp.Compare(x.Name, y.Name) })
 	a.inventory()
+	a.underlay()
 	a.settings()
 	a.tenants()
 	a.networks()
@@ -67,7 +69,7 @@ func (a *adopter) inventory() {
 		if !role.Valid() {
 			role = InferRole(sw.Config)
 		}
-		s := &fabric.Switch{Name: sw.Name, Mgmt: sw.Mgmt, Role: role, Model: sw.Model}
+		s := &fabric.Switch{Name: sw.Name, Mgmt: fabric.AddrOf(sw.Mgmt), Role: role, Model: sw.Model}
 		r.Switches = append(r.Switches, s)
 		if role.VTEP() {
 			a.vteps = append(a.vteps, sw)
@@ -121,29 +123,91 @@ func reflectsRoutes(cfg *device.Config) bool {
 	return false
 }
 
-// pairVPC links switches whose vPC domains share an ID and point their
-// keepalives at each other.
+// pairVPC records switches whose vPC domains share an ID and point their
+// keepalives at each other as vPC pairs.
 func pairVPC(r *fabric.Region, switches []*device.Switch) {
 	byName := map[string]*device.Switch{}
 	for _, sw := range switches {
 		byName[sw.Name] = sw
 	}
-	for _, s := range r.Switches {
+	paired := map[string]bool{}
+	for i, s := range r.Switches {
 		mine := byName[s.Name].Config.VPC
-		if mine == nil || s.VPCPeer != "" {
+		if mine == nil || paired[s.Name] {
 			continue
 		}
-		for _, t := range r.Switches {
+		for _, t := range r.Switches[i+1:] {
 			theirs := byName[t.Name].Config.VPC
-			if t == s || theirs == nil || t.VPCPeer != "" || theirs.ID != mine.ID {
+			if theirs == nil || paired[t.Name] || theirs.ID != mine.ID || s.Role != t.Role {
 				continue
 			}
-			if mine.KeepaliveDest == theirs.KeepaliveSource && theirs.KeepaliveDest == mine.KeepaliveSource && s.Role == t.Role {
-				s.VPCPeer, t.VPCPeer = t.Name, s.Name
+			if mine.KeepaliveDest == theirs.KeepaliveSource && theirs.KeepaliveDest == mine.KeepaliveSource {
+				paired[s.Name], paired[t.Name] = true, true
+				r.VPCPairs = append(r.VPCPairs, newPair(byName[s.Name].Config, byName[t.Name].Config, s.Name, t.Name))
 				break
 			}
 		}
 	}
+}
+
+func newPair(a, b *device.Config, nameA, nameB string) *fabric.VPCPair {
+	p := &fabric.VPCPair{Domain: a.VPC.ID}
+	if a.PeerLink() == device.PeerLinkPhysical {
+		p.PeerLink = fabric.PeerLinkPhysical
+	}
+	if lo, ok := a.Interfaces[nveSource(a)]; ok && len(lo.Secondary) > 0 {
+		p.AnycastVTEP = fabric.AddrOf(lo.Secondary[0].Addr())
+	}
+	for i, side := range []struct {
+		name string
+		cfg  *device.Config
+	}{{nameA, a}, {nameB, b}} {
+		m := fabric.VPCMember{Switch: side.name}
+		m.Keepalive = parseAddr(side.cfg.VPC.KeepaliveSource)
+		m.PeerLinkSource = parseAddr(side.cfg.VPC.VirtualPeerLinkSource)
+		for _, name := range slices.Sorted(maps.Keys(side.cfg.Interfaces)) {
+			iface := side.cfg.Interfaces[name]
+			switch {
+			case iface.PeerLink && iface.Kind == device.KindPortChannel:
+				p.PortChannel = portChannelNumber(name)
+			case iface.ChannelGroup != 0 && p.PeerLink == fabric.PeerLinkPhysical && isPeerLinkMember(side.cfg, iface.ChannelGroup):
+				m.PeerLinkPorts = append(m.PeerLinkPorts, name)
+			}
+		}
+		p.Members[i] = m
+	}
+	return p
+}
+
+func nveSource(c *device.Config) string {
+	if c.NVE == nil {
+		return ""
+	}
+	return c.NVE.SourceInterface
+}
+
+func isPeerLinkMember(c *device.Config, group int) bool {
+	po, ok := c.Interfaces[fabric.PortChannelName(group)]
+	return ok && po.PeerLink
+}
+
+func portChannelNumber(name string) int {
+	n := 0
+	for _, r := range strings.TrimPrefix(name, "port-channel") {
+		if r < '0' || r > '9' {
+			return 0
+		}
+		n = n*10 + int(r-'0')
+	}
+	return n
+}
+
+func parseAddr(s string) fabric.Addr {
+	a, err := netip.ParseAddr(s)
+	if err != nil {
+		return fabric.Addr{}
+	}
+	return fabric.AddrOf(a)
 }
 
 // vote counts values held by switches and returns the majority, the
@@ -418,7 +482,7 @@ func (a *adopter) gateway(n *fabric.Network, subject string, gw *vote[netip.Pref
 		}
 		return
 	}
-	n.Gateway = g
+	n.Gateway = fabric.PrefixOf(g)
 	if len(out) > 0 {
 		a.conflict(subject+".gateway", g.String(), out, "switches use another gateway address")
 	}
@@ -458,10 +522,10 @@ func (a *adopter) dedupeVNIs() {
 			continue
 		}
 		for _, g := range gateways {
-			if g.Gateway.Overlaps(n.Gateway) {
+			if g.Gateway.Overlaps(n.Gateway.Prefix) {
 				a.conflict("networks["+n.VLAN.String()+"].gateway", "", nil,
 					"gateway overlaps VLAN %s; left as L2-only", g.VLAN)
-				n.Gateway, n.Tenant, n.ACLIn = netip.Prefix{}, "", ""
+				n.Gateway, n.Tenant, n.ACLIn = fabric.Prefix{}, "", ""
 				break
 			}
 		}
@@ -473,7 +537,7 @@ func (a *adopter) dedupeVNIs() {
 		if n.Tenant != "" {
 			if _, ok := r.Tenant(n.Tenant); !ok {
 				a.conflict("networks["+n.VLAN.String()+"]", "", nil, "gateway VRF %s is not a tenant; left as L2-only", n.Tenant)
-				n.Gateway, n.Tenant, n.ACLIn = netip.Prefix{}, "", ""
+				n.Gateway, n.Tenant, n.ACLIn = fabric.Prefix{}, "", ""
 			}
 		}
 	}

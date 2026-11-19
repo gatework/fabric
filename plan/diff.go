@@ -21,19 +21,29 @@ type Options struct {
 }
 
 // Diff returns the ordered operations that move cfg to the desired state.
+//
+// Settings are compared against the configuration as the structural
+// operations leave it, because many settings live on objects the plan
+// creates (the BGP process, the vPC domain, the NVE interface).
 func Diff(d *Desired, cfg *device.Config, opt Options) []Op {
 	var ops []Op
 	ops = append(ops, diffFeatures(d, cfg)...)
-	ops = append(ops, diffSettings(d, cfg)...)
 	ops = append(ops, diffServers(d, cfg)...)
+	ops = append(ops, diffUnderlay(d, cfg)...)
 	ops = append(ops, diffVRFs(d, cfg, opt)...)
 	ops = append(ops, diffVLANs(d, cfg, opt)...)
 	ops = append(ops, diffEVPN(d, cfg, opt)...)
 	ops = append(ops, diffMembers(d, cfg, opt)...)
 	ops = append(ops, diffSVIs(d, cfg, opt)...)
 	ops = append(ops, diffBGPVRFs(d, cfg, opt)...)
+	ops = append(ops, diffResets(d, cfg)...)
 	ops = append(ops, diffPorts(d, cfg)...)
-	return Order(ops)
+	ops = Order(ops)
+	after := cfg
+	if sim, err := Simulate(cfg, ops); err == nil {
+		after = sim
+	}
+	return Order(append(ops, diffSettings(d, after)...))
 }
 
 // Order sorts operations so that deletions run first, most dependent
@@ -327,10 +337,30 @@ func diffBGPVRFs(d *Desired, cfg *device.Config, opt Options) []Op {
 	return ops
 }
 
+func diffResets(d *Desired, cfg *device.Config) []Op {
+	var ops []Op
+	for _, name := range slices.Sorted(slices.Values(d.Reset)) {
+		i, ok := cfg.Interfaces[name]
+		if !ok {
+			continue
+		}
+		if _, managed := d.Ports[name]; managed {
+			continue
+		}
+		ops = append(ops, ResetOp{Interface: name, Saved: i})
+	}
+	return ops
+}
+
 func diffPorts(d *Desired, cfg *device.Config) []Op {
 	var ops []Op
 	for _, name := range sortedKeys(d.Ports) {
 		i, ok := cfg.Interfaces[name]
+		if _, kind := device.CanonicalInterface(name); !ok && kind == device.KindPortChannel {
+			want := mergePort(Port{}, d.Ports[name])
+			ops = append(ops, PortOp{Interface: name, Want: &want})
+			continue
+		}
 		if !ok {
 			want := mergePort(Port{}, d.Ports[name])
 			ops = append(ops, PortOp{Interface: name, Want: &want})

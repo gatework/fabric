@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"net/netip"
 	"slices"
 
 	"go.yaml.in/yaml/v3"
@@ -21,14 +20,22 @@ type Intent struct {
 
 // Region is one site and the single fabric it runs.
 type Region struct {
-	Name      string     `yaml:"name" json:"name"`
-	Fabric    Settings   `yaml:"fabric" json:"fabric"`
-	Numbering Numbering  `yaml:"numbering,omitempty" json:"numbering,omitzero"`
-	Switches  []*Switch  `yaml:"switches" json:"switches"`
-	Tenants   []*Tenant  `yaml:"tenants,omitempty" json:"tenants,omitempty"`
-	Networks  []*Network `yaml:"networks,omitempty" json:"networks,omitempty"`
-	// Attachments are the host ports the intent manages. Ports not listed
-	// are left as they are.
+	Name      string    `yaml:"name" json:"name"`
+	Fabric    Settings  `yaml:"fabric" json:"fabric"`
+	Numbering Numbering `yaml:"numbering,omitempty" json:"numbering,omitzero"`
+	// Underlay, when declared, makes the routed underlay and the overlay
+	// control plane (loopbacks, links, OSPF, BGP, NVE, vPC domains)
+	// managed. Without it only services are managed.
+	Underlay *Underlay  `yaml:"underlay,omitempty" json:"underlay,omitempty"`
+	Switches []*Switch  `yaml:"switches" json:"switches"`
+	VPCPairs []*VPCPair `yaml:"vpc_pairs,omitempty" json:"vpc_pairs,omitempty"`
+	Links    []*Link    `yaml:"links,omitempty" json:"links,omitempty"`
+	Tenants  []*Tenant  `yaml:"tenants,omitempty" json:"tenants,omitempty"`
+	Networks []*Network `yaml:"networks,omitempty" json:"networks,omitempty"`
+	// PortProfiles name reusable host-port settings.
+	PortProfiles []*PortProfile `yaml:"port_profiles,omitempty" json:"port_profiles,omitempty"`
+	// Attachments are the host connections the intent manages. Ports not
+	// listed are left as they are.
 	Attachments []*Attachment `yaml:"attachments,omitempty" json:"attachments,omitempty"`
 }
 
@@ -52,12 +59,15 @@ type Numbering struct {
 
 // Switch is one managed Nexus switch.
 type Switch struct {
-	Name string     `yaml:"name" json:"name"`
-	Mgmt netip.Addr `yaml:"mgmt" json:"mgmt"`
-	Role Role       `yaml:"role" json:"role"`
-	// VPCPeer names the other member of this switch's vPC pair, if any.
-	VPCPeer string `yaml:"vpc_peer,omitempty" json:"vpc_peer,omitempty"`
-	Model   string `yaml:"model,omitempty" json:"model,omitempty"`
+	Name  string `yaml:"name" json:"name"`
+	Mgmt  Addr   `yaml:"mgmt" json:"mgmt"`
+	Role  Role   `yaml:"role" json:"role"`
+	Model string `yaml:"model,omitempty" json:"model,omitempty"`
+	// RouterID is the loopback0 address: OSPF and BGP router-id and BGP
+	// update source. Required when the region manages its underlay.
+	RouterID Addr `yaml:"router_id,omitempty" json:"router_id,omitzero"`
+	// VTEP is the loopback1 primary address, the NVE source of a VTEP.
+	VTEP Addr `yaml:"vtep,omitempty" json:"vtep,omitzero"`
 }
 
 // Tenant is a routed VRF stretched over the VTEPs of a region.
@@ -77,20 +87,11 @@ type Network struct {
 	Tenant string `yaml:"tenant,omitempty" json:"tenant,omitempty"`
 	// Gateway is the anycast gateway address and prefix; unset means an
 	// L2-only network.
-	Gateway netip.Prefix `yaml:"gateway,omitempty" json:"gateway,omitzero"`
-	ACLIn   string       `yaml:"acl_in,omitempty" json:"acl_in,omitempty"`
+	Gateway Prefix `yaml:"gateway,omitempty" json:"gateway,omitzero"`
+	ACLIn   string `yaml:"acl_in,omitempty" json:"acl_in,omitempty"`
 	// Switches restricts the network to these switches; empty means every
 	// VTEP of the region.
 	Switches []string `yaml:"switches,omitempty" json:"switches,omitempty"`
-}
-
-// Attachment is one host-facing port and the networks it carries.
-type Attachment struct {
-	Switch    string   `yaml:"switch" json:"switch"`
-	Interface string   `yaml:"interface" json:"interface"`
-	Mode      PortMode `yaml:"mode,omitempty" json:"mode"`
-	// Networks lists VLANs carried by the port; an access port carries one.
-	Networks []VLAN `yaml:"networks" json:"networks"`
 }
 
 // DecodeIntent strictly decodes a YAML intent document and validates it.
@@ -147,6 +148,49 @@ func (r *Region) Switch(name string) (*Switch, bool) {
 	for _, s := range r.Switches {
 		if s.Name == name {
 			return s, true
+		}
+	}
+	return nil, false
+}
+
+// Peer returns the vPC peer of the named switch.
+func (r *Region) Peer(name string) (string, bool) {
+	if p, ok := r.Pair(name); ok {
+		return p.Other(name), true
+	}
+	return "", false
+}
+
+// Pair returns the vPC pair the named switch belongs to.
+func (r *Region) Pair(name string) (*VPCPair, bool) {
+	for _, p := range r.VPCPairs {
+		if p.Has(name) {
+			return p, true
+		}
+	}
+	return nil, false
+}
+
+// LinksOf returns the fabric links that end on the named switch, with
+// that switch's end first.
+func (r *Region) LinksOf(name string) []LinkView {
+	var out []LinkView
+	for _, l := range r.Links {
+		switch name {
+		case l.A.Switch:
+			out = append(out, LinkView{Local: l.A, Remote: l.B})
+		case l.B.Switch:
+			out = append(out, LinkView{Local: l.B, Remote: l.A})
+		}
+	}
+	return out
+}
+
+// Profile returns the named port profile.
+func (r *Region) Profile(name string) (*PortProfile, bool) {
+	for _, p := range r.PortProfiles {
+		if p.Name == name {
+			return p, true
 		}
 	}
 	return nil, false

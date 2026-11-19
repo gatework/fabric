@@ -3,6 +3,7 @@ package fabric_test
 import (
 	"errors"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -32,6 +33,23 @@ func TestDecodeIntent(t *testing.T) {
 	if len(r.VTEPs()) != 3 || len(r.ByRole(fabric.RoleSpine)) != 1 {
 		t.Errorf("roles: vteps %d", len(r.VTEPs()))
 	}
+	if p, ok := r.Peer("DC1-LEF02"); !ok || p != "DC1-LEF01" {
+		t.Errorf("peer = %q %v", p, ok)
+	}
+	if l := r.LinksOf("DC1-SPN01"); len(l) != 1 || l[0].Remote.Switch != "DC1-LEF01" {
+		t.Errorf("links of spine = %+v", l)
+	}
+	vpc := r.Attachments[2]
+	spec := r.Spec(vpc)
+	if spec.Mode != fabric.PortTrunk || len(spec.Networks) != 3 || !spec.Edge || spec.Description != "DB-01" {
+		t.Errorf("vpc spec = %+v", spec)
+	}
+	if ports := vpc.Ports("DC1-LEF02"); len(ports) != 2 || ports[1] != "port-channel20" {
+		t.Errorf("vpc ports = %v", ports)
+	}
+	if r.Underlay.Pools.PortChannels.Compact() != "1-4000" {
+		t.Errorf("pools = %+v", r.Underlay.Pools)
+	}
 	n, _ := r.Network(300)
 	if vni, ok := r.VNIOf(n); !ok || vni != 10300 {
 		t.Errorf("derived vni = %v %v", vni, ok)
@@ -51,8 +69,13 @@ func TestDecodeIntent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fabric.DecodeIntent(body); err != nil {
+	back, err := fabric.DecodeIntent(body)
+	if err != nil {
 		t.Fatalf("round trip: %v\n%s", err, body)
+	}
+	// Regression: yaml.v3 omitempty used to drop every netip value.
+	if !reflect.DeepEqual(back, in) {
+		t.Errorf("round trip changed the intent:\n%s", body)
 	}
 }
 
@@ -66,7 +89,11 @@ func TestValidateReportsEveryProblem(t *testing.T) {
 		&fabric.Network{VLAN: 401, Tenant: "NOPE"},
 		&fabric.Network{VLAN: 402, Tenant: "PROD", Gateway: r.Networks[0].Gateway},
 	)
-	r.Switches[1].VPCPeer = "DC1-BDR01"
+	r.VPCPairs[0].Members[1].Switch = "DC1-BDR01"
+	r.Links = append(r.Links, &fabric.Link{
+		A: fabric.LinkEnd{Switch: "DC1-LEF02", Interface: "Ethernet1/49", Address: fabric.MustParsePrefix("10.1.0.5/30")},
+		B: fabric.LinkEnd{Switch: "DC1-SPN01", Interface: "Ethernet1/1", Address: fabric.MustParsePrefix("10.1.1.6/30")},
+	})
 	err := in.Validate()
 	var ve *fabric.ValidationError
 	if !errors.As(err, &ve) || !errors.Is(err, fabric.ErrIntent) {
@@ -76,7 +103,8 @@ func TestValidateReportsEveryProblem(t *testing.T) {
 	for _, p := range ve.Problems {
 		text += p.String() + "\n"
 	}
-	for _, want := range []string{"vlan already used", "is a tenant l3vni", "unknown tenant NOPE", "overlaps", "does not name"} {
+	for _, want := range []string{"vlan already used", "is a tenant l3vni", "unknown tenant NOPE", "overlaps",
+		"same role", "not in one subnet", "already used by a fabric link"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("missing problem %q in:\n%s", want, text)
 		}
