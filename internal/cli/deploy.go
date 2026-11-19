@@ -1,0 +1,164 @@
+package cli
+
+import (
+	"bufio"
+	"fmt"
+	"net/netip"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"github.com/gatework/go-netops/store"
+
+	"github.com/gatework/fabric/internal/bootstrap"
+	"github.com/gatework/fabric/internal/workflow"
+)
+
+func newDeploy(e env) *cobra.Command {
+	var planDir, confirm, journal string
+	var doApply, save bool
+	var ssh bootstrap.SSH
+	c := &cobra.Command{
+		Use:   "deploy",
+		Short: "按批次下发计划（默认只预览；--apply 才写入设备）",
+		Long: "按计划中的批次下发。每台交换机：变更前健康快照 → 校验配置指纹 → 打 checkpoint → 逐行写入 → 回读验证 → 健康门限对比。" +
+			"任何一台失败、不确定或健康退化都会停止后续批次；不会自动重试或回滚，请按报告中的 checkpoint 使用 fabric rollback。",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			b, err := workflow.ReadBundle(planDir)
+			if err != nil {
+				return err
+			}
+			printBundle(e, b)
+			if !doApply {
+				_, _ = fmt.Fprintln(e.stdout, "\n预览模式：未连接设备。确认无误后加 --apply --confirm "+b.ID+" 执行。")
+				return nil
+			}
+			if err := confirmed(e, b.ID, confirm); err != nil {
+				return err
+			}
+			creds, err := bootstrap.CredentialsFromEnv(e.lookup)
+			if err != nil {
+				return err
+			}
+			st, err := store.New(journal, store.Options{})
+			if err != nil {
+				return err
+			}
+			rep := workflow.Deploy(cmd.Context(), workflow.DeployRequest{
+				Bundle: b, Dial: ssh.Dialer(creds), Journal: store.NewJournal(st), Save: save,
+			})
+			if err := st.PublishJSON(cmd.Context(), "deploy.json", rep); err != nil {
+				return err
+			}
+			printDeploy(e, rep)
+			_, _ = fmt.Fprintf(e.stdout, "执行记录：%s\n", st.Directory())
+			if !rep.OK() {
+				return exit(ExitFindings, "下发未全部完成，请先处理上面的失败项")
+			}
+			return nil
+		},
+	}
+	c.Flags().StringVar(&planDir, "plan", "", "计划目录")
+	c.Flags().BoolVar(&doApply, "apply", false, "实际写入设备")
+	c.Flags().StringVar(&confirm, "confirm", "", "计划 ID；非交互执行时必须提供")
+	c.Flags().BoolVar(&save, "save", false, "验证通过后 copy running-config startup-config")
+	c.Flags().StringVar(&journal, "journal", "executions", "执行记录根目录")
+	_ = c.MarkFlagRequired("plan")
+	sshFlags(c, &ssh)
+	return c
+}
+
+// confirmed requires the operator to name the plan: by flag, or by typing
+// it on a terminal.
+func confirmed(e env, id, flag string) error {
+	if flag != "" {
+		if flag != id {
+			return exit(ExitError, "--confirm %s 与计划 ID %s 不一致", flag, id)
+		}
+		return nil
+	}
+	if !e.tty {
+		return exit(ExitError, "非交互执行需要 --confirm %s", id)
+	}
+	_, _ = fmt.Fprintf(e.stdout, "\n将写入设备。输入计划 ID %s 确认：", id)
+	line, _ := bufio.NewReader(e.stdin).ReadString('\n')
+	if strings.TrimSpace(line) != id {
+		return exit(ExitError, "未确认，已取消")
+	}
+	return nil
+}
+
+func outcomeText(o workflow.Outcome) string {
+	switch o {
+	case workflow.OutcomeVerified:
+		return "已验证"
+	case workflow.OutcomeSkipped:
+		return "已跳过"
+	case workflow.OutcomeDrifted:
+		return "配置已变化，拒绝执行"
+	case workflow.OutcomeFailed:
+		return "失败"
+	case workflow.OutcomeUncertain:
+		return "结果不确定（禁止自动重试）"
+	case workflow.OutcomeDegraded:
+		return "已写入但健康退化"
+	default:
+		return string(o)
+	}
+}
+
+func printDeploy(e env, rep workflow.DeployReport) {
+	w := e.stdout
+	_, _ = fmt.Fprintln(w, "\n下发结果：")
+	for _, r := range rep.Results {
+		line := fmt.Sprintf("  第 %d 批 %s：%s", r.Wave, r.Switch, outcomeText(r.Outcome))
+		if r.Detail != "" {
+			line += "（" + r.Detail + "）"
+		}
+		if len(r.Lost) > 0 {
+			line += " 丢失：" + strings.Join(r.Lost, "、")
+		}
+		if r.Checkpoint != "" && r.Outcome != workflow.OutcomeVerified {
+			line += " 回滚：fabric rollback --switch " + r.Mgmt + " --checkpoint " + r.Checkpoint
+		}
+		_, _ = fmt.Fprintln(w, line)
+	}
+	if rep.StoppedAt != 0 {
+		_, _ = fmt.Fprintf(w, "第 %d 批出现问题，后续批次已停止。\n", rep.StoppedAt)
+	}
+}
+
+func newRollback(e env) *cobra.Command {
+	var mgmt, checkpoint, confirm string
+	var ssh bootstrap.SSH
+	c := &cobra.Command{
+		Use:   "rollback",
+		Short: "将一台交换机原子回滚到指定 checkpoint",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			addr, err := netip.ParseAddr(mgmt)
+			if err != nil {
+				return exit(ExitError, "管理地址 %q 无效", mgmt)
+			}
+			if err := confirmed(e, checkpoint, confirm); err != nil {
+				return err
+			}
+			creds, err := bootstrap.CredentialsFromEnv(e.lookup)
+			if err != nil {
+				return err
+			}
+			fp, err := workflow.Rollback(cmd.Context(), ssh.Dialer(creds)(addr), checkpoint)
+			if err != nil {
+				return err
+			}
+			_, _ = fmt.Fprintf(e.stdout, "%s 已回滚到 %s，当前配置指纹 %s\n", mgmt, checkpoint, fp[:12])
+			return nil
+		},
+	}
+	c.Flags().StringVar(&mgmt, "switch", "", "交换机管理地址")
+	c.Flags().StringVar(&checkpoint, "checkpoint", "", "checkpoint 名称")
+	c.Flags().StringVar(&confirm, "confirm", "", "checkpoint 名称；非交互执行时必须提供")
+	_ = c.MarkFlagRequired("switch")
+	_ = c.MarkFlagRequired("checkpoint")
+	sshFlags(c, &ssh)
+	return c
+}

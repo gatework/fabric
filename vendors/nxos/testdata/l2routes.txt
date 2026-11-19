@@ -1,0 +1,8 @@
+
+Flags -(Rmac):Router MAC (Stt):Static (L):Local (R):Remote 
+(Dup):Duplicate (Spl):Split (Rcv):Recv (AD):Auto-Delete (D):Del Pending
+Topology    Mac Address    Prod   Flags              Seq No     Next-Hops                              
+----------- -------------- ------ ------------------- ---------- ---------------------------------------------------------
+100         5254.00aa.0001 BGP    SplRcv             0          10.0.1.200 (Label: 10100)
+100         5254.00aa.0002 Local  L,                 0          Po10
+101         5254.00aa.0009 Local  L,Dup,PF,          12         Eth1/2

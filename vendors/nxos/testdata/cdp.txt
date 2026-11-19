@@ -1,0 +1,19 @@
+----------------------------------------
+Device ID:DC1-SPN01(FDO00000001)
+System Name: DC1-SPN01
+
+Interface address(es):
+    IPv4 Address: 10.1.0.2
+Platform: N9K-C9336C-FX2, Capabilities: Router Switch IGMP Filtering Supports-STP-Dispute
+Interface: Ethernet1/49, Port ID (outgoing port): Ethernet1/1
+Holdtime: 130 sec
+
+Version:
+Cisco Nexus Operating System (NX-OS) Software, Version 9.3(10)
+
+Mgmt address(es):
+    IPv4 Address: 198.51.100.1
+----------------------------------------
+Device ID:storage-a
+Platform: NetApp, Capabilities: Host
+Interface: Ethernet1/2, Port ID (outgoing port): e0a

@@ -1,0 +1,31 @@
+Legend:
+                (*) - local vPC is down, forwarding via vPC peer-link
+
+vPC domain id                     : 10  
+Peer status                       : peer adjacency formed ok      
+vPC keep-alive status             : peer is alive                 
+Configuration consistency status  : success 
+Per-vlan consistency status       : failed                        
+Type-2 consistency status         : success 
+vPC role                          : primary                       
+Number of vPCs configured         : 2  
+Virtual-peerlink mode             : Enabled
+
+vPC Peer-link status
+---------------------------------------------------------------------
+id    Port   Status Active vlans    
+--    ----   ------ -------------------------------------------------
+1     Po100  up     1,100-101,999                                     
+
+vPC status
+----------------------------------------------------------------------------
+Id    Port          Status Consistency Reason                Active vlans
+--    ------------  ------ ----------- ------                ---------------
+10    Po10          up     success     success               100-101,               
+                                                             999                    
+40    Po40          down*  Not         Consistency Check Not -                           
+                           Applicable   Performed                                        
+
+Please check "show vpc consistency-parameters vpc <vpc-num>" for the 
+consistency reason of down vpc and for type-2 consistency reasons for 
+any vpc.

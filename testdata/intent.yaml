@@ -1,0 +1,26 @@
+schema: 1
+regions:
+  - name: dc1
+    fabric:
+      asn: 65001
+      anycast_gateway_mac: 0000.2222.3333
+      replication: ingress
+      svi_mtu: 9216
+      suppress_arp: true
+    numbering:
+      l2vni_base: 10000
+    switches:
+      - {name: DC1-SPN01, mgmt: 198.51.100.1, role: spine}
+      - {name: DC1-LEF01, mgmt: 198.51.100.11, role: leaf, vpc_peer: DC1-LEF02}
+      - {name: DC1-LEF02, mgmt: 198.51.100.12, role: leaf, vpc_peer: DC1-LEF01}
+      - {name: DC1-BDR01, mgmt: 198.51.100.21, role: border}
+    tenants:
+      - {name: PROD, l3vni: 50000, vlan: 999}
+    networks:
+      - {name: web, vlan: 100, tenant: PROD, gateway: 10.10.100.1/24, acl_in: WEB-IN}
+      - {vlan: 101, tenant: PROD, gateway: 10.10.101.1/24}
+      - {name: l2only, vlan: 200, switches: [DC1-LEF01, DC1-LEF02]}
+      - {name: app, vlan: 300, tenant: PROD, gateway: 10.10.44.1/24}
+    attachments:
+      - {switch: DC1-LEF01, interface: Ethernet1/3, mode: access, networks: [300]}
+      - {switch: DC1-LEF01, interface: port-channel10, mode: trunk, networks: [100, 101, 300]}

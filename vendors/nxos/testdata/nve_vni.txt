@@ -1,0 +1,9 @@
+Codes: CP - Control Plane        DP - Data Plane          
+       UC - Unconfigured         SA - Suppress ARP        
+       SU - Suppress Unknown Unicast 
+    
+Interface VNI      Multicast-group   State Mode Type [BD/VRF]      Flags
+--------- -------- ----------------- ----- ---- ------------------ -----
+nve1      10100    UnicastBGP        Up    CP   L2 [100]           SA   
+nve1      10101    UnicastBGP        Down  CP   L2 [101]           SA   
+nve1      50000    n/a               Up    CP   L3 [PROD]               

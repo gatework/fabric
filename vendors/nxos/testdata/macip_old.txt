@@ -1,0 +1,4 @@
+Flags -(Rmac):Router MAC (Stt):Static (L):Local (R):Remote (V):vPC link 
+Topology    Mac Address    Prod   Flags         Seq No     Host IP         Next-Hops      
+----------- -------------- ------ ---------- --------------- ---------------
+100         5254.00aa.0001 BGP    --            0          10.10.100.21    10.0.1.200 

@@ -1,0 +1,79 @@
+# fabric import boundaries (STANDARD.md ARC-1), enforced by archcheck in `make check`.
+# Direction: cmd -> internal/cli -> internal/bootstrap -> internal/workflow
+#            -> rollout/check/adopt -> plan/baseline -> device -> fabric;
+#            vendors and adapters point inward.
+declared:
+  - .
+  - ./device
+  - ./plan
+  - ./baseline
+  - ./adopt
+  - ./check
+  - ./rollout
+  - ./report
+  - ./vendors/nxos
+  - ./adapter/snapshot
+  - ./adapter/netconnector
+  - ./internal/bootstrap
+  - ./internal/workflow
+  - ./internal/cli
+  - ./internal/corpus
+  - ./cmd/fabric
+
+rules:
+  - name: domain packages stay free of I/O
+    packages: [., ./device, ./plan, ./baseline, ./adopt, ./check, ./rollout, ./report, ./vendors/...]
+    deny: [os, os/exec, io/fs, net, net/http, database/sql, path/filepath, syscall,
+           github.com/gatework/net-connector/..., github.com/gatework/go-expect/...]
+
+  - name: the intent model is the base
+    packages: [.]
+    deny: [./...]
+
+  - name: the observed model depends only on the intent vocabulary
+    packages: [./device]
+    only_local: [.]
+
+  - name: planning works on intent and observation
+    packages: [./plan]
+    only_local: [., ./device]
+
+  - name: baselines plan through the planner
+    packages: [./baseline]
+    only_local: [., ./device, ./plan]
+
+  - name: adoption reads observation into intent
+    packages: [./adopt]
+    only_local: [., ./device]
+
+  - name: checks assess observation against intent and baseline
+    packages: [./check]
+    only_local: [., ./device, ./plan, ./baseline]
+
+  - name: rollout schedules plans without syntax
+    packages: [./rollout]
+    only_local: [., ./device, ./plan]
+
+  - name: reports describe results without device syntax
+    packages: [./report]
+    only_local: [., ./device, ./plan, ./baseline, ./adopt, ./check, ./rollout]
+
+  - name: vendors own device syntax
+    packages: [./vendors/...]
+    only_local: [., ./device, ./plan]
+
+  - name: adapters depend only on the observed model and vendors
+    packages: [./adapter/...]
+    only_local: [., ./device, ./plan, ./vendors/nxos]
+
+  - name: only the netconnector adapter talks to devices
+    packages: [./adapter/snapshot]
+    deny: [github.com/gatework/net-connector/..., ./adapter/netconnector]
+
+  - name: workflows do not reach the command line
+    packages: [./internal/workflow, ./internal/bootstrap]
+    deny: [./internal/cli, ./cmd/..., github.com/spf13/...]
+
+  - name: commands only wire the cli package
+    packages: [./cmd/...]
+    only_local: [./internal/cli]
