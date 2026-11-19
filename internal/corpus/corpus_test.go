@@ -24,7 +24,7 @@ func corpus(t *testing.T) *workflow.Fleet {
 	if dir == "" {
 		t.Skip("FABRIC_CORPUS not set")
 	}
-	f, err := workflow.LoadSnapshot(t.Context(), dir, nil, 24)
+	f, err := workflow.LoadSnapshot(t.Context(), dir, nil, workflow.LoadOptions{SubnetBits: 24})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,6 +49,24 @@ func TestCorpusParse(t *testing.T) {
 		}
 	}
 	t.Logf("switches %d, dimensions %v, unmodeled top-level lines %d", len(f.Switches), status, unparsed)
+	rows := map[string]int{}
+	for _, sw := range f.Switches {
+		st := sw.State
+		rows["macs"] += len(st.MACs)
+		rows["l2routes"] += len(st.L2Routes)
+		rows["mac_ips"] += len(st.MACIPs)
+		rows["nve_peers"] += len(st.NVEPeers)
+		rows["bgp"] += len(st.BGP.Neighbors)
+		for _, m := range st.MACs {
+			if m.RemoteVTEP != "" {
+				rows["macs_remote"]++
+			}
+		}
+		for _, r := range st.L2Routes {
+			rows["l2route_hops"] += len(r.NextHops)
+		}
+	}
+	t.Logf("rows %v", rows)
 }
 
 // TestCorpusAdoptPlanLoop adopts every region, then plans the draft: every
@@ -256,4 +274,17 @@ func checkBundle(t *testing.T, p *workflow.Provisioned) int {
 		t.Errorf("refused: %s", r.Reason)
 	}
 	return len(p.Bundle.Items)
+}
+
+func BenchmarkCorpusLoad(b *testing.B) {
+	dir := os.Getenv("FABRIC_CORPUS")
+	if dir == "" {
+		b.Skip("FABRIC_CORPUS not set")
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := workflow.LoadSnapshot(b.Context(), dir, nil, workflow.LoadOptions{SubnetBits: 24}); err != nil {
+			b.Fatal(err)
+		}
+	}
 }

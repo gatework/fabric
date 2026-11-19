@@ -2,7 +2,6 @@ package nxos
 
 import (
 	"strings"
-	"unicode/utf8"
 
 	"github.com/gatework/parser"
 )
@@ -54,7 +53,8 @@ func buildTree(content *parser.Content) []*node {
 	for line := range content.All() {
 		text := strings.TrimRight(line.Text, " \t\r")
 		trimmed := strings.TrimLeft(text, " \t")
-		if trimmed == "" || trimmed[0] == '!' || !utf8.ValidString(trimmed) {
+		// ParseConfig validated the whole text as UTF-8.
+		if trimmed == "" || trimmed[0] == '!' {
 			continue
 		}
 		indent := len(text) - len(trimmed)

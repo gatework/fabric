@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/gatework/go-netops/assess"
@@ -10,6 +11,8 @@ import (
 	"github.com/gatework/fabric/adopt"
 	"github.com/gatework/fabric/baseline"
 	"github.com/gatework/fabric/check"
+	"github.com/gatework/fabric/device"
+	"github.com/gatework/fabric/internal/parallel"
 	"github.com/gatework/fabric/vendors/nxos"
 )
 
@@ -45,7 +48,24 @@ func Check(ctx context.Context, req CheckRequest) (check.Report, error) {
 	if len(fabrics) == 0 {
 		return check.Report{}, fmt.Errorf("workflow: no region %q", req.Region)
 	}
-	return a.Run(ctx, fabrics)
+	return assessAll(ctx, a, fabrics)
+}
+
+// assessAll runs fabric and switch catalogs concurrently; rules are pure,
+// so the report equals a sequential run.
+func assessAll(ctx context.Context, a *check.Assessor, fabrics []*check.Fabric) (check.Report, error) {
+	rep := check.Report{Fabrics: map[string]assess.Assessment{}, Switches: map[string]assess.Assessment{}}
+	fres, ferrs := parallel.Map(ctx, 0, fabrics, a.Fabric)
+	var switches []*device.Switch
+	for i, f := range fabrics {
+		rep.Fabrics[f.Name] = fres[i]
+		switches = append(switches, f.Switches...)
+	}
+	sres, serrs := parallel.Map(ctx, 0, switches, a.Switch)
+	for i, sw := range switches {
+		rep.Switches[sw.Key()] = sres[i]
+	}
+	return rep, errors.Join(append(ferrs, serrs...)...)
 }
 
 // Import drafts an intent from the fleet, one region per fleet region.

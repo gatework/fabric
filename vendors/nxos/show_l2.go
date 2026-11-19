@@ -217,36 +217,55 @@ func addMembers(ms []device.PortChannelMember, text string) []device.PortChannel
 	return ms
 }
 
-var macRow = regexp.MustCompile(`^([*CG+RO~ ]{0,3})\s*(\d+|-)\s+([0-9a-f]{4}\.[0-9a-f]{4}\.[0-9a-f]{4})\s+(\S+)\s+\S+\s+\S+\s+\S+\s+(.+)$`)
-var remotePort = regexp.MustCompile(`^nve\d+\((\S+)\)$`)
-
 func parseMACs(st *device.State, text string) *result {
 	r := &result{empty: blank(text)}
-	st.MACs = []device.MACEntry{}
+	st.MACs = make([]device.MACEntry, 0, strings.Count(text, "\n"))
 	legend := true
+	var tok tokens
 	for line := range textscan.Lines(text) {
-		raw := strings.TrimRight(line.Text, " ")
-		t := strings.TrimSpace(raw)
+		t := strings.TrimSpace(line.Text)
 		switch {
 		case t == "" || dashes(t):
 		case strings.HasPrefix(t, "VLAN") && strings.Contains(t, "MAC Address"):
 			r.header, legend = true, false
 		case legend:
-		case macRow.MatchString(t):
-			m := macRow.FindStringSubmatch(t)
-			e := device.MACEntry{Marker: strings.TrimSpace(m[1]), MAC: fabric.MAC(m[3]), Type: m[4], Port: strings.TrimSpace(m[5])}
-			if v, err := fabric.ParseVLAN(m[2]); err == nil {
-				e.VLAN = v
-			}
-			if rm := remotePort.FindStringSubmatch(e.Port); rm != nil {
-				e.RemoteVTEP = rm[1]
-			} else if !strings.Contains(e.Port, " ") {
-				e.Port, _ = device.CanonicalInterface(e.Port)
+		default:
+			e, ok := macRow(tok.split(t))
+			if !ok {
+				r.scan.Unparsed(line.Number)
+				continue
 			}
 			st.MACs = append(st.MACs, e)
-		default:
-			r.scan.Unparsed(line.Number)
 		}
 	}
 	return r
+}
+
+// macRow reads "[marker] VLAN MAC type age secure ntfy port...".
+func macRow(f []string) (device.MACEntry, bool) {
+	var e device.MACEntry
+	if len(f) > 0 && isMACMarker(f[0]) {
+		e.Marker, f = f[0], f[1:]
+	}
+	if len(f) < 7 || (!isDigits(f[0]) && f[0] != "-") || !isMAC(f[1]) {
+		return e, false
+	}
+	e.MAC, e.Type = fabric.MAC(f[1]), f[2]
+	if v, err := fabric.ParseVLAN(f[0]); err == nil {
+		e.VLAN = v
+	}
+	port := f[6]
+	if len(f) > 7 {
+		port = strings.Join(f[6:], " ")
+	}
+	switch {
+	case strings.HasPrefix(port, "nve") && strings.HasSuffix(port, ")"):
+		if open := strings.IndexByte(port, '('); open > 0 {
+			e.RemoteVTEP = port[open+1 : len(port)-1]
+		}
+	case !strings.Contains(port, " "):
+		port, _ = device.CanonicalInterface(port)
+	}
+	e.Port = port
+	return e, true
 }

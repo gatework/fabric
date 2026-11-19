@@ -1,7 +1,6 @@
 package nxos
 
 import (
-	"regexp"
 	"strings"
 
 	"github.com/gatework/go-netops/textscan"
@@ -10,23 +9,24 @@ import (
 	"github.com/gatework/fabric/device"
 )
 
-var (
-	macToken   = regexp.MustCompile(`^[0-9a-f]{4}\.[0-9a-f]{4}\.[0-9a-f]{4}$`)
-	labelToken = regexp.MustCompile(`\(Label:\s*\d+\)`)
-)
-
-// nextHops splits "1.1.1.1 (Label: 10090)" or "1.1.1.1,2.2.2.2" into hops;
-// labels are dropped.
-func nextHops(text string) []string {
-	text = labelToken.ReplaceAllString(text, "")
-	var out []string
-	for _, h := range strings.FieldsFunc(text, func(r rune) bool { return r == ',' || r == ' ' }) {
-		if h != "" {
-			out = append(out, h)
+// nextHops reads the hop fields of a row, "1.1.1.1 (Label: 10090)" or
+// "1.1.1.1,2.2.2.2"; labels are dropped.
+func nextHops(fields []string) []string {
+	out := make([]string, 0, 1)
+	label := false
+	for _, f := range fields {
+		switch {
+		case strings.HasPrefix(f, "(Label"):
+			label = !strings.HasSuffix(f, ")")
+		case label:
+			label = !strings.HasSuffix(f, ")")
+		default:
+			for h := range strings.SplitSeq(f, ",") {
+				if h != "" {
+					out = append(out, h)
+				}
+			}
 		}
-	}
-	if out == nil {
-		out = []string{}
 	}
 	return out
 }
@@ -35,18 +35,24 @@ func parseL2Routes(st *device.State, text string) *result {
 	r := &result{empty: blank(text)}
 	st.L2Routes = []device.L2Route{}
 	legend := true
+	var tok tokens
 	for line := range textscan.Lines(text) {
 		t := strings.TrimSpace(line.Text)
-		f := strings.Fields(t)
 		switch {
 		case t == "" || dashes(t):
+			continue
 		case strings.HasPrefix(t, "Topology"):
 			r.header, legend = true, false
+			continue
 		case legend:
-		case len(f) >= 6 && macToken.MatchString(f[1]):
+			continue
+		}
+		f := tok.split(t)
+		switch {
+		case len(f) >= 6 && isMAC(f[1]):
 			st.L2Routes = append(st.L2Routes, device.L2Route{
 				Topology: f[0], MAC: fabric.MAC(f[1]), Producer: f[2], Flags: f[3],
-				Sequence: max(atoiStrict(f[4]), 0), NextHops: nextHops(strings.Join(f[5:], " ")),
+				Sequence: max(atoiStrict(f[4]), 0), NextHops: nextHops(f[5:]),
 			})
 		default:
 			r.scan.Unparsed(line.Number)
@@ -61,23 +67,29 @@ func parseMACIPs(st *device.State, text string) *result {
 	r := &result{empty: blank(text)}
 	st.MACIPs = []device.MACIPRoute{}
 	legend, ipFirst := true, true
+	var tok tokens
 	for line := range textscan.Lines(text) {
 		t := strings.TrimSpace(line.Text)
-		f := strings.Fields(t)
 		switch {
 		case t == "" || dashes(t):
+			continue
 		case strings.HasPrefix(t, "Topology"):
 			r.header, legend = true, false
 			ipFirst = strings.Index(t, "Host IP") < strings.Index(t, "Prod")
+			continue
 		case legend:
-		case len(f) >= 7 && macToken.MatchString(f[1]):
+			continue
+		}
+		f := tok.split(t)
+		switch {
+		case len(f) >= 7 && isMAC(f[1]):
 			e := device.MACIPRoute{Topology: f[0], MAC: fabric.MAC(f[1])}
 			if ipFirst {
 				e.IP, e.Producer, e.Flags, e.Sequence = f[2], f[3], f[4], max(atoiStrict(f[5]), 0)
 			} else {
 				e.Producer, e.Flags, e.Sequence, e.IP = f[2], f[3], max(atoiStrict(f[4]), 0), f[5]
 			}
-			e.NextHops = nextHops(strings.Join(f[6:], " "))
+			e.NextHops = nextHops(f[6:])
 			st.MACIPs = append(st.MACIPs, e)
 		default:
 			r.scan.Unparsed(line.Number)

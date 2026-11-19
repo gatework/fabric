@@ -20,6 +20,8 @@ declared:
   - ./internal/workflow
   - ./internal/cli
   - ./internal/corpus
+  - ./internal/parallel
+  - ./internal/synth
   - ./cmd/fabric
 
 rules:
@@ -79,6 +81,10 @@ rules:
   - name: only the netconnector adapter talks to devices
     packages: [./adapter/snapshot]
     deny: [github.com/gatework/net-connector/..., ./adapter/netconnector]
+
+  - name: the worker pool is generic
+    packages: [./internal/parallel]
+    deny: [./...]
 
   - name: workflows do not reach the command line
     packages: [./internal/workflow, ./internal/bootstrap]

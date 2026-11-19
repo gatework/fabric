@@ -179,6 +179,18 @@ func (a *Assessor) Run(ctx context.Context, fabrics []*Fabric) (Report, error) {
 	return rep, nil
 }
 
+// Fabric assesses one fabric with the fabric catalog. It is safe to call
+// concurrently.
+func (a *Assessor) Fabric(ctx context.Context, f *Fabric) (assess.Assessment, error) {
+	return a.fabrics.Run(ctx, f, f.Coverage())
+}
+
+// Switch assesses one switch with the switch catalog. It is safe to call
+// concurrently.
+func (a *Assessor) Switch(ctx context.Context, sw *device.Switch) (assess.Assessment, error) {
+	return a.switches.Run(ctx, sw, sw.Coverage)
+}
+
 // RuleIDs lists every rule identifier, switch rules first.
 func RuleIDs() []assess.RuleID {
 	var out []assess.RuleID

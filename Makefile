@@ -1,7 +1,7 @@
 STANDARDS_DIR ?=
 include standard.mk
 
-.PHONY: fuzz corpus
+.PHONY: fuzz corpus bench synth
 
 CHECK_EXTRA += fuzz
 
@@ -17,3 +17,13 @@ fuzz:
 corpus:
 	@test -n "$(FABRIC_CORPUS)" || { echo "set FABRIC_CORPUS to a snapshot directory"; exit 1; }
 	$(GO) test -count=1 -run Corpus -v ./internal/corpus | grep -E '^(=== RUN|--- |\s+corpus_test|ok|FAIL)'
+
+# Fleet-scale benchmarks on a synthetic 1000-switch fabric; compare with
+# bench/baseline.txt using benchstat.
+bench:
+	$(GO) test -run '^$$' -bench . -benchtime 3x -count 1 ./internal/synth | tee bench/current.txt
+
+# Writes the synthetic fabric (snapshot + intent) to SYNTH_OUT.
+synth:
+	@test -n "$(SYNTH_OUT)" || { echo "set SYNTH_OUT to a directory"; exit 1; }
+	FABRIC_SYNTH_OUT=$(SYNTH_OUT) $(GO) test -count=1 -run WriteFleet ./internal/synth

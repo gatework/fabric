@@ -48,36 +48,58 @@ type Capture struct {
 	Outputs map[string]Output
 }
 
-// ReadAll reads every switch directory under root, in address order.
+// List returns the switch directories under root in address order.
 // Directories whose name is not an address are ignored.
-func ReadAll(ctx context.Context, root string) ([]Capture, error) {
+func List(root string) ([]string, error) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return nil, fmt.Errorf("snapshot: %w", err)
 	}
-	var out []Capture
+	type dir struct {
+		addr netip.Addr
+		path string
+	}
+	var dirs []dir
 	for _, e := range entries {
+		if addr, err := netip.ParseAddr(e.Name()); err == nil && e.IsDir() {
+			dirs = append(dirs, dir{addr, filepath.Join(root, e.Name())})
+		}
+	}
+	slices.SortFunc(dirs, func(a, b dir) int { return a.addr.Compare(b.addr) })
+	out := make([]string, len(dirs))
+	for i, d := range dirs {
+		out[i] = d.path
+	}
+	return out, nil
+}
+
+// ReadAll reads every switch directory under root, in address order.
+func ReadAll(ctx context.Context, root string) ([]Capture, error) {
+	dirs, err := List(root)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Capture, 0, len(dirs))
+	for _, d := range dirs {
 		if err := ctx.Err(); err != nil {
 			return nil, fmt.Errorf("snapshot: %w", err)
 		}
-		addr, err := netip.ParseAddr(e.Name())
-		if err != nil || !e.IsDir() {
-			continue
-		}
-		c, err := Read(filepath.Join(root, e.Name()))
+		c, err := Read(d)
 		if err != nil {
 			return nil, err
 		}
-		c.Mgmt = addr
 		out = append(out, c)
 	}
-	slices.SortFunc(out, func(a, b Capture) int { return a.Mgmt.Compare(b.Mgmt) })
 	return out, nil
 }
 
 // Read reads one switch directory. The directory name is parsed as the
 // management address when it is one.
-func Read(dir string) (Capture, error) {
+func Read(dir string) (Capture, error) { return ReadSome(dir, nil) }
+
+// ReadSome reads the commands keep accepts (all when keep is nil); the
+// receipts of other commands are not read at all.
+func ReadSome(dir string, keep func(command string) bool) (Capture, error) {
 	c := Capture{Outputs: map[string]Output{}}
 	if addr, err := netip.ParseAddr(filepath.Base(dir)); err == nil {
 		c.Mgmt = addr
@@ -88,7 +110,7 @@ func Read(dir string) (Capture, error) {
 	}
 	slices.Sort(sidecars)
 	for _, name := range sidecars {
-		out, err := readOne(dir, name)
+		out, err := readOne(dir, name, keep)
 		if err != nil {
 			return c, err
 		}
@@ -100,7 +122,7 @@ func Read(dir string) (Capture, error) {
 	return c, nil
 }
 
-func readOne(dir, name string) (Output, error) {
+func readOne(dir, name string, keep func(string) bool) (Output, error) {
 	meta, err := os.ReadFile(filepath.Join(dir, name))
 	if err != nil {
 		return Output{}, fmt.Errorf("snapshot: %w", err)
@@ -108,6 +130,9 @@ func readOne(dir, name string) (Output, error) {
 	var sc Sidecar
 	if err := json.Unmarshal(meta, &sc); err != nil {
 		return Output{}, fmt.Errorf("snapshot: %s: %w", name, err)
+	}
+	if keep != nil && !keep(sc.Command) {
+		return Output{}, nil
 	}
 	rawPath := filepath.Join(dir, strings.TrimSuffix(name, ".json")+".output")
 	info, err := os.Stat(rawPath)
@@ -139,19 +164,33 @@ var promptLine = regexp.MustCompile(`^[\w.:/-]+(\([\w-]+\))?[#>]\s*$`)
 // Clean turns a terminal receipt into command output: carriage returns are
 // removed, and so are the echoed command on the first line and the closing
 // prompt on the last.
+//
+// It slices instead of splitting: receipts are megabytes and loaded by
+// the thousand.
 func Clean(raw, command, prompt string) string {
-	text := strings.ReplaceAll(raw, "\r", "")
-	lines := strings.Split(text, "\n")
-	if len(lines) > 0 && strings.TrimSpace(lines[0]) == strings.TrimSpace(command) {
-		lines = lines[1:]
+	text := raw
+	if strings.IndexByte(text, '\r') >= 0 {
+		text = strings.ReplaceAll(text, "\r", "")
 	}
-	for len(lines) > 0 {
-		last := strings.TrimSpace(lines[len(lines)-1])
-		if last == "" || (prompt != "" && last == strings.TrimSpace(prompt)) || promptLine.MatchString(last) {
-			lines = lines[:len(lines)-1]
+	first, rest, more := strings.Cut(text, "\n")
+	if strings.TrimSpace(first) == strings.TrimSpace(command) {
+		text = ""
+		if more {
+			text = rest
+		}
+	}
+	prompt = strings.TrimSpace(prompt)
+	for {
+		text = strings.TrimRight(text, " \t\n")
+		start := strings.LastIndexByte(text, '\n') + 1
+		last := strings.TrimSpace(text[start:])
+		if last == "" || (prompt != "" && last == prompt) || (len(last) < 80 && promptLine.MatchString(last)) {
+			if last == "" {
+				return ""
+			}
+			text = text[:start]
 			continue
 		}
-		break
+		return text
 	}
-	return strings.Join(lines, "\n")
 }

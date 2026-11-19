@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/gatework/go-netops/evidence"
 	"github.com/gatework/go-netops/store"
 
 	"github.com/gatework/fabric"
@@ -163,12 +164,13 @@ func (f *fleetFlags) bind(c *cobra.Command, needIntent bool) {
 	}
 }
 
-func (f *fleetFlags) load(cmd *cobra.Command) (*workflow.Fleet, error) {
+// load reads the snapshot; dims limits parsing (nil reads everything).
+func (f *fleetFlags) load(cmd *cobra.Command, dims []evidence.Dimension) (*workflow.Fleet, error) {
 	in, err := bootstrap.ReadIntent(f.intent)
 	if err != nil {
 		return nil, err
 	}
-	return workflow.LoadSnapshot(cmd.Context(), f.snapshot, in, f.bits)
+	return workflow.LoadSnapshot(cmd.Context(), f.snapshot, in, workflow.LoadOptions{SubnetBits: f.bits, Dimensions: dims})
 }
 
 func newCheck(e env) *cobra.Command {
@@ -179,7 +181,7 @@ func newCheck(e env) *cobra.Command {
 		Use:   "check",
 		Short: "检查配置关系、运行状态、一致性，以及与意图/基线的偏差",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			fleet, err := ff.load(cmd)
+			fleet, err := ff.load(cmd, nil)
 			if err != nil {
 				return err
 			}
@@ -191,7 +193,7 @@ func newCheck(e env) *cobra.Command {
 				return err
 			}
 			if prevPath != "" {
-				if req.Previous, err = workflow.LoadSnapshot(cmd.Context(), prevPath, fleet.Intent, ff.bits); err != nil {
+				if req.Previous, err = workflow.LoadSnapshot(cmd.Context(), prevPath, fleet.Intent, workflow.LoadOptions{SubnetBits: ff.bits}); err != nil {
 					return err
 				}
 			}
@@ -243,7 +245,7 @@ func newBaseline(e env) *cobra.Command {
 		Use:   "derive",
 		Short: "按现网多数值生成基线草稿",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			fleet, err := ff.load(cmd)
+			fleet, err := ff.load(cmd, workflow.ConfigOnly())
 			if err != nil {
 				return err
 			}
@@ -268,7 +270,7 @@ func newImport(e env) *cobra.Command {
 		Short: "从现网反推意图草稿（存量 fabric 纳管）",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ff.intent = ""
-			fleet, err := ff.load(cmd)
+			fleet, err := ff.load(cmd, workflow.ConfigOnly())
 			if err != nil {
 				return err
 			}
@@ -308,7 +310,7 @@ func newPlan(e env) *cobra.Command {
 		Use:   "plan",
 		Short: "按意图（与基线）生成经过闭环验证的分批变更计划",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			fleet, err := ff.load(cmd)
+			fleet, err := ff.load(cmd, workflow.ConfigOnly())
 			if err != nil {
 				return err
 			}

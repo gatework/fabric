@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/baseline"
 	"github.com/gatework/fabric/device"
+	"github.com/gatework/fabric/internal/parallel"
 	"github.com/gatework/fabric/plan"
 	"github.com/gatework/fabric/rollout"
 	"github.com/gatework/fabric/vendors/nxos"
@@ -94,11 +96,18 @@ func Plan(req PlanRequest) (*Bundle, error) {
 		return nil, ErrNoIntent
 	}
 	b := &Bundle{CreatedAt: req.Now.UTC(), Refused: []Refusal{}}
+	var chosen []*device.Switch
 	for _, sw := range req.Fleet.Switches {
-		if !selected(req, sw) {
-			continue
+		if selected(req, sw) {
+			chosen = append(chosen, sw)
 		}
-		it, err := planSwitch(req, sw)
+	}
+	// Switches plan independently; results keep fleet order.
+	items, errs := parallel.Map(context.Background(), 0, chosen, func(_ context.Context, sw *device.Switch) (*Item, error) {
+		return planSwitch(req, sw)
+	})
+	for i, sw := range chosen {
+		it, err := items[i], errs[i]
 		switch {
 		case errors.Is(err, errUnchanged):
 			b.Unchanged++

@@ -3,15 +3,19 @@ package workflow
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"net/netip"
 	"slices"
 
+	"github.com/gatework/go-netops/evidence"
+
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/adapter/snapshot"
 	"github.com/gatework/fabric/adopt"
 	"github.com/gatework/fabric/device"
+	"github.com/gatework/fabric/internal/parallel"
 	"github.com/gatework/fabric/vendors/nxos"
 )
 
@@ -24,25 +28,62 @@ type Fleet struct {
 	Switches []*device.Switch
 }
 
-// LoadSnapshot reads a capture directory and assembles every switch. With
-// an intent, switches take their name, region, role and model from it;
-// without one, roles are inferred from configuration and regions are the
-// management /bits subnets.
-func LoadSnapshot(ctx context.Context, dir string, in *fabric.Intent, bits int) (*Fleet, error) {
-	caps, err := snapshot.ReadAll(ctx, dir)
+// LoadOptions tune LoadSnapshot.
+type LoadOptions struct {
+	// SubnetBits groups switches into regions by management prefix when
+	// there is no intent.
+	SubnetBits int
+	// Dimensions limits parsing; nil reads everything. Planning needs only
+	// the configuration, which is several times faster to load.
+	Dimensions []evidence.Dimension
+	// Workers bounds concurrency; zero uses every CPU.
+	Workers int
+}
+
+// ConfigOnly loads only running configurations.
+func ConfigOnly() []evidence.Dimension { return []evidence.Dimension{device.DimConfig} }
+
+// LoadSnapshot reads a capture directory and assembles every switch, in
+// parallel. With an intent, switches take their name, region, role and
+// model from it; without one, roles are inferred from configuration and
+// regions are the management subnets.
+func LoadSnapshot(ctx context.Context, dir string, in *fabric.Intent, opt LoadOptions) (*Fleet, error) {
+	dirs, err := snapshot.List(dir)
 	if err != nil {
 		return nil, err
 	}
-	f := &Fleet{Intent: in}
-	for _, c := range caps {
+	keep := commandFilter(opt.Dimensions)
+	switches, errs := parallel.Map(ctx, opt.Workers, dirs, func(_ context.Context, d string) (*device.Switch, error) {
+		c, err := snapshot.ReadSome(d, keep)
+		if err != nil {
+			return nil, err
+		}
 		outs := make(map[string]string, len(c.Outputs))
 		for cmd, o := range c.Outputs {
 			outs[cmd] = o.Text
 		}
-		f.Switches = append(f.Switches, nxos.Assemble(device.Identity{Mgmt: c.Mgmt}, outs))
+		return nxos.Assemble(device.Identity{Mgmt: c.Mgmt}, outs), nil
+	})
+	if err := errors.Join(errs...); err != nil {
+		return nil, err
 	}
-	f.identify(bits)
+	f := &Fleet{Intent: in, Switches: switches}
+	f.identify(opt.SubnetBits)
 	return f, nil
+}
+
+// commandFilter accepts the commands of the requested dimensions.
+func commandFilter(dims []evidence.Dimension) func(string) bool {
+	if dims == nil {
+		return nil
+	}
+	want := map[string]bool{}
+	for _, p := range nxos.Probes() {
+		if slices.Contains(dims, p.Dimension) {
+			want[p.Command] = true
+		}
+	}
+	return func(cmd string) bool { return want[cmd] }
 }
 
 // Regions returns the region names in order.

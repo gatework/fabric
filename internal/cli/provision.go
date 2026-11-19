@@ -8,10 +8,12 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/gatework/go-netops/evidence"
 	"github.com/gatework/go-netops/store"
 	"github.com/gatework/set"
 
 	"github.com/gatework/fabric"
+	"github.com/gatework/fabric/device"
 	"github.com/gatework/fabric/internal/bootstrap"
 	"github.com/gatework/fabric/internal/workflow"
 	"github.com/gatework/fabric/plan"
@@ -42,7 +44,9 @@ func (f *changeFlags) run(cmd *cobra.Command, e env, req provision.Request) erro
 	}
 	preq := workflow.ProvisionRequest{Intent: in, Request: req, Now: time.Now()}
 	if f.snapshot != "" {
-		if preq.Fleet, err = workflow.LoadSnapshot(cmd.Context(), f.snapshot, in, 0); err != nil {
+		if preq.Fleet, err = workflow.LoadSnapshot(cmd.Context(), f.snapshot, in, workflow.LoadOptions{
+			Dimensions: []evidence.Dimension{device.DimConfig, device.DimMACs, device.DimInterfaces},
+		}); err != nil {
 			return err
 		}
 	}
@@ -381,7 +385,9 @@ func newPortFree(e env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fleet, err := workflow.LoadSnapshot(cmd.Context(), snapshot, in, 0)
+			fleet, err := workflow.LoadSnapshot(cmd.Context(), snapshot, in, workflow.LoadOptions{
+				Dimensions: []evidence.Dimension{device.DimConfig, device.DimInterfaces},
+			})
 			if err != nil {
 				return err
 			}
