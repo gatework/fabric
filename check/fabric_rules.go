@@ -15,6 +15,7 @@ import (
 	"github.com/gatework/fabric/baseline"
 	"github.com/gatework/fabric/device"
 	"github.com/gatework/fabric/plan"
+	"github.com/gatework/fabric/topology"
 )
 
 // Rule identifiers of the fabric catalog.
@@ -30,6 +31,12 @@ const (
 	RuleIntentDrift      assess.RuleID = "fabric.intent_drift"
 	RuleBaselineDrift    assess.RuleID = "fabric.baseline_drift"
 	RuleRegression       assess.RuleID = "fabric.regression"
+	RuleLinkMissing      assess.RuleID = "fabric.link_missing"
+	RuleLinkMiscabled    assess.RuleID = "fabric.link_miscabled"
+	RuleLinkUndeclared   assess.RuleID = "fabric.link_undeclared"
+	RuleLinkInconsistent assess.RuleID = "fabric.link_inconsistent"
+	RuleLeafSpineMesh    assess.RuleID = "fabric.leaf_spine_mesh"
+	RuleDuplicateIP      assess.RuleID = "fabric.endpoint_duplicate_ip"
 )
 
 type fabricEval func(f *Fabric, sub assess.Subject) []assess.Finding
@@ -46,6 +53,7 @@ func FabricRules() []assess.Rule[*Fabric] {
 	high, med, low := assess.SeverityHigh, assess.SeverityMedium, assess.SeverityLow
 	cons, rt, dr := assess.CategoryConsistency, assess.CategoryRuntime, assess.CategoryDrift
 	cfg := []evidence.Dimension{device.DimConfig}
+	cdp := []evidence.Dimension{device.DimConfig, device.DimCDP}
 	return []assess.Rule[*Fabric]{
 		fabricRule(RuleVLANMapping, "同一 VLAN 在 VTEP 间映射到不同 VNI", high, cons, cfg, vlanMapping),
 		fabricRule(RuleVNIGateway, "同一 VNI 的 anycast 网关或 VRF 不一致", high, cons, cfg, vniGateway),
@@ -58,6 +66,12 @@ func FabricRules() []assess.Rule[*Fabric] {
 		fabricRule(RuleIntentDrift, "运行配置偏离意图", med, dr, cfg, intentDrift),
 		fabricRule(RuleBaselineDrift, "运行配置偏离基线", med, dr, cfg, baselineDrift),
 		fabricRule(RuleRegression, "相比上次采集出现运行状态退化", high, dr, []evidence.Dimension{device.DimNVEPeers, device.DimBGP, device.DimOSPF}, regression),
+		fabricRule(RuleLinkMissing, "意图互联在 CDP 中不可见", high, rt, cdp, linkState(topology.StateMissing)),
+		fabricRule(RuleLinkMiscabled, "互联错接", high, cons, cdp, linkState(topology.StateMiscabled)),
+		fabricRule(RuleLinkUndeclared, "存在意图未声明的 leaf–spine 互联", low, cons, cdp, linkState(topology.StateUndeclared)),
+		fabricRule(RuleLinkInconsistent, "互联两端配置不一致（MTU/OSPF/子网）", high, cons, cfg, linkMismatch),
+		fabricRule(RuleLeafSpineMesh, "VTEP 未与全部 spine 互联", med, cons, cfg, unmeshed),
+		fabricRule(RuleDuplicateIP, "同一 IP 被多个 MAC 宣告", high, rt, []evidence.Dimension{device.DimMACIPs}, duplicateIPs),
 	}
 }
 
@@ -408,4 +422,61 @@ func fullNeighbors(sw *device.Switch) map[string]bool {
 
 func checkBaseline(sub assess.Subject, exp baseline.Expectation, cfg *device.Config) []drift.Deviation {
 	return baseline.Check(sub, exp, cfg)
+}
+
+func linkState(want topology.State) fabricEval {
+	return func(f *Fabric, sub assess.Subject) []assess.Finding {
+		var out []assess.Finding
+		for _, c := range f.Topology().Links {
+			if c.State != want {
+				continue
+			}
+			out = append(out, found(sub.Child("switch", c.A.Switch).Child("link", c.A.Interface),
+				c.Name+"："+orText(c.Detail, c.State.String()), "connected as declared", c.State.String()))
+		}
+		return out
+	}
+}
+
+func orText(s, alt string) string {
+	if s == "" {
+		return alt
+	}
+	return s
+}
+
+func linkMismatch(f *Fabric, sub assess.Subject) []assess.Finding {
+	var out []assess.Finding
+	for _, c := range f.Topology().Links {
+		if len(c.Mismatch) > 0 && c.State != topology.StateUndeclared {
+			out = append(out, found(sub.Child("switch", c.A.Switch).Child("link", c.A.Interface),
+				c.Name+" 两端不一致："+strings.Join(c.Mismatch, "，"), "same", c.Mismatch))
+		}
+	}
+	return out
+}
+
+func unmeshed(f *Fabric, sub assess.Subject) []assess.Finding {
+	if f.Intent == nil || f.Intent.Underlay == nil {
+		return nil
+	}
+	var out []assess.Finding
+	for _, pair := range f.Topology().Unmeshed {
+		out = append(out, found(sub.Child("mesh", pair), pair+" 之间没有互联", "linked", "absent"))
+	}
+	return out
+}
+
+func duplicateIPs(f *Fabric, sub assess.Subject) []assess.Finding {
+	dups := f.Endpoints().DuplicateIPs()
+	var out []assess.Finding
+	for _, ip := range slices.Sorted(maps.Keys(dups)) {
+		macs := dups[ip]
+		parts := make([]string, len(macs))
+		for i, m := range macs {
+			parts[i] = string(m)
+		}
+		out = append(out, found(sub.Child("ip", ip), fmt.Sprintf("IP %s 被 %d 个 MAC 宣告：%s", ip, len(macs), strings.Join(parts, "、")), 1, len(macs)))
+	}
+	return out
 }

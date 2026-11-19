@@ -9,6 +9,9 @@ declared:
   - ./baseline
   - ./adopt
   - ./numbering
+  - ./status
+  - ./endpoint
+  - ./topology
   - ./provision
   - ./check
   - ./rollout
@@ -26,7 +29,7 @@ declared:
 
 rules:
   - name: domain packages stay free of I/O
-    packages: [., ./device, ./plan, ./baseline, ./adopt, ./check, ./rollout, ./report, ./numbering, ./provision, ./vendors/...]
+    packages: [., ./device, ./plan, ./baseline, ./adopt, ./check, ./rollout, ./report, ./numbering, ./provision, ./status, ./endpoint, ./topology, ./vendors/...]
     deny: [os, os/exec, io/fs, net, net/http, database/sql, path/filepath, syscall,
            github.com/gatework/net-connector/..., github.com/gatework/go-expect/...]
 
@@ -58,9 +61,13 @@ rules:
     packages: [./provision]
     only_local: [., ./device, ./numbering]
 
+  - name: views of the observed fabric depend on the models only
+    packages: [./status, ./endpoint, ./topology]
+    only_local: [., ./device]
+
   - name: checks assess observation against intent and baseline
     packages: [./check]
-    only_local: [., ./device, ./plan, ./baseline]
+    only_local: [., ./device, ./plan, ./baseline, ./endpoint, ./topology]
 
   - name: rollout schedules plans without syntax
     packages: [./rollout]
@@ -68,7 +75,7 @@ rules:
 
   - name: reports describe results without device syntax
     packages: [./report]
-    only_local: [., ./device, ./plan, ./baseline, ./adopt, ./check, ./rollout, ./provision]
+    only_local: [., ./device, ./plan, ./baseline, ./adopt, ./check, ./rollout, ./provision, ./status, ./endpoint, ./topology]
 
   - name: vendors own device syntax
     packages: [./vendors/...]

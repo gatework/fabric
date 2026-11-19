@@ -22,7 +22,8 @@ func (g *gen) vtep(i int) netip.Addr {
 func (g *gen) hostIP(leaf, host int) (net int, ip string) {
 	s := g.spec
 	net = host % s.Networks
-	idx := (leaf*s.LocalHosts+host)/s.Networks + 2
+	perNet := (s.LocalHosts + s.Networks - 1) / s.Networks
+	idx := leaf*perNet + host/s.Networks + 2
 	return net, fmt.Sprintf("10.%d.%d.%d", g.r, 10+net, idx)
 }
 

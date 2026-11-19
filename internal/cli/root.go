@@ -82,6 +82,7 @@ func newRoot(e env) *cobra.Command {
 		newParse(e), newCollect(e), newCheck(e), newBaseline(e),
 		newImport(e), newPlan(e), newDeploy(e), newRollback(e),
 		newNetwork(e), newTenant(e), newSwitch(e), newPort(e),
+		newStatus(e), newLocate(e), newTopology(e),
 	)
 	return root
 }
