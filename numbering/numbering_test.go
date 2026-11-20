@@ -5,7 +5,7 @@ import (
 	"net/netip"
 	"testing"
 
-	"github.com/gatework/set"
+	"github.com/gatework/netops/set"
 
 	"github.com/gatework/fabric/numbering"
 )

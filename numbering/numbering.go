@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net/netip"
 
-	"github.com/gatework/set"
+	"github.com/gatework/netops/set"
 )
 
 // ErrExhausted reports a pool without a free value.

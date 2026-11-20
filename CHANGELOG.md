@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## [0.2.0] - 2026-11-20
+
+- 公开编号池、设备模型和规划操作的区间类型现来自 `github.com/gatework/netops/set`。调用方同步更新 import；配置文件的区间编码保持一致。
+
 ## v0.1.0 - 2026-11-20
 
 - 设备会话改由 net-connector v0.10.0 `connector` 提供（x/crypto/ssh 进程内实现，NX-OS 分页、检查点、回滚与保存由其 NX-OS 驱动负责）；`adapter/netconnector` 改写为基于 `connector.Dialer`，`vendors/nxos` 不再声明传输行为。
