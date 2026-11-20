@@ -128,7 +128,7 @@ func TestChangesetChecks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := cs.Satisfied(after); err != nil {
+	if err := cs.Unsatisfied(after); err != nil {
 		t.Fatalf("satisfied: %v", err)
 	}
 	if err := cs.Preserved(cfg, after); err != nil {
@@ -142,7 +142,7 @@ func TestChangesetChecks(t *testing.T) {
 	if err := cs.Preserved(cfg, collateral); !errors.Is(err, plan.ErrCollateral) {
 		t.Errorf("collateral change accepted: %v", err)
 	}
-	script, err := cs.Render()
+	script, err := cs.Render(cfg)
 	if err != nil || len(script.Rollback) != len(ops) {
 		t.Errorf("render: %v rollback %v", err, script.Rollback)
 	}

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gatework/go-netops/assess"
+	"github.com/gatework/netops/assess"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/check"
@@ -41,7 +41,7 @@ func leaf(tb testing.TB, name, mgmt string, mutate func(string) string) *device.
 	}
 	id := device.Identity{Name: name, Region: "dc1", Role: fabric.RoleLeaf}
 	id.Mgmt, _ = parseAddr(mgmt)
-	return nxos.Assemble(id, outs)
+	return nxos.Assemble(tb.Context(), id, outs)
 }
 
 func run(tb testing.TB, f *check.Fabric) map[assess.RuleID][]string {

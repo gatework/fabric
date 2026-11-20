@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gatework/netops/evidence"
+
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/device"
 	"github.com/gatework/fabric/plan"
@@ -29,7 +31,7 @@ func setup(tb testing.TB) (*fabric.Intent, *provision.Observation) {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	sw := nxos.Assemble(device.Identity{Name: "DC1-LEF01"}, map[string]string{"show running-config": string(cfg)})
+	sw := nxos.Assemble(tb.Context(), device.Identity{Name: "DC1-LEF01"}, map[string]string{"show running-config": string(cfg)})
 	return in, provision.NewObservation([]*device.Switch{sw})
 }
 
@@ -88,7 +90,7 @@ func TestAddNetworkAllocatesAndPlans(t *testing.T) {
 func parseLeaf(tb testing.TB) *device.Config {
 	tb.Helper()
 	b, _ := os.ReadFile("../vendors/nxos/testdata/leaf.cfg")
-	cfg, err := nxos.ParseConfig(string(b))
+	cfg, err := nxos.ParseConfig(tb.Context(), string(b))
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -101,9 +103,9 @@ func TestRemoveNetworkGuards(t *testing.T) {
 	if _, _, err := provision.Apply(in, provision.RemoveNetwork{Region: "dc1", VLAN: 300}, obs); !errors.Is(err, provision.ErrInUse) {
 		t.Errorf("vlan carried by a port: %v", err)
 	}
-	sw := nxos.Assemble(device.Identity{Name: "DC1-LEF01"}, map[string]string{})
+	sw := nxos.Assemble(t.Context(), device.Identity{Name: "DC1-LEF01"}, map[string]string{})
 	sw.Config = parseLeaf(t)
-	sw.Coverage[device.DimConfig] = "complete"
+	sw.Coverage = sw.Coverage.With(device.DimConfig, evidence.StatusComplete)
 	sw.State.MACs = []device.MACEntry{{VLAN: 200, MAC: "5254.0000.0009", Type: "dynamic", Port: "Ethernet1/2"}}
 	busy := provision.NewObservation([]*device.Switch{sw})
 	if _, _, err := provision.Apply(in, provision.RemoveNetwork{Region: "dc1", VLAN: 200}, busy); !errors.Is(err, provision.ErrInUse) {

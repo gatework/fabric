@@ -1,4 +1,4 @@
-// Package check assesses observed fabrics with go-netops assess rules.
+// Package check assesses observed fabrics with netops assess rules.
 //
 // Two catalogs run: switch rules over each [*device.Switch] (configuration
 // relations, operational health, security), and fabric rules over each

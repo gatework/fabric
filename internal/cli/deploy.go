@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"net/netip"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/gatework/go-netops/store"
+	"github.com/gatework/netops/store"
+	njournal "github.com/gatework/netops/store/journal"
 
 	"github.com/gatework/fabric/internal/bootstrap"
 	"github.com/gatework/fabric/internal/workflow"
@@ -41,18 +43,26 @@ func newDeploy(e env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			st, err := store.New(journal, store.Options{})
+			dial, err := ssh.Dialer(creds)
+			if err != nil {
+				return err
+			}
+			st, err := store.NewBatch(journal, time.Now())
+			if err != nil {
+				return err
+			}
+			execs, err := njournal.Open(st.Root(), nil)
 			if err != nil {
 				return err
 			}
 			rep := workflow.Deploy(cmd.Context(), workflow.DeployRequest{
-				Bundle: b, Dial: ssh.Dialer(creds), Journal: store.NewJournal(st), Save: save, Gate: gf.options(),
+				Bundle: b, Dial: dial, Journal: execs, Save: save, Gate: gf.options(),
 			})
-			if err := st.PublishJSON(cmd.Context(), "deploy.json", rep); err != nil {
+			if _, err := st.WriteJSON(cmd.Context(), "deploy.json", rep); err != nil {
 				return err
 			}
 			printDeploy(e, rep)
-			_, _ = fmt.Fprintf(e.stdout, "执行记录：%s\n", st.Directory())
+			_, _ = fmt.Fprintf(e.stdout, "执行记录：%s\n", st.Root())
 			if !rep.OK() {
 				return exit(ExitFindings, "下发未全部完成，请先处理上面的失败项")
 			}
@@ -158,7 +168,11 @@ func newRollback(e env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res, err := workflow.Rollback(cmd.Context(), ssh.Dialer(creds)(addr), checkpoint)
+			dial, err := ssh.Dialer(creds)
+			if err != nil {
+				return err
+			}
+			res, err := workflow.Rollback(cmd.Context(), dial(addr), checkpoint)
 			if err != nil {
 				return err
 			}

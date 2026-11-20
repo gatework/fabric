@@ -22,7 +22,7 @@ func sw(tb testing.TB, name, mgmt string, edit func(string) string) *device.Swit
 	text := strings.ReplaceAll(string(b), "DC1-LEF01", name)
 	text = strings.Replace(text, "peer-keepalive destination 198.51.100.12 source 198.51.100.11",
 		"peer-keepalive destination "+peerOf(mgmt)+" source "+mgmt, 1)
-	return nxos.Assemble(device.Identity{Mgmt: netip.MustParseAddr(mgmt)}, map[string]string{"show running-config": edit(text)})
+	return nxos.Assemble(tb.Context(), device.Identity{Mgmt: netip.MustParseAddr(mgmt)}, map[string]string{"show running-config": edit(text)})
 }
 
 func peerOf(mgmt string) string {
@@ -87,7 +87,7 @@ func TestAdoptReportsDisagreement(t *testing.T) {
 func TestInferRole(t *testing.T) {
 	t.Parallel()
 	b, _ := os.ReadFile("../vendors/nxos/testdata/spine.cfg")
-	cfg, err := nxos.ParseConfig(string(b))
+	cfg, err := nxos.ParseConfig(t.Context(), string(b))
 	if err != nil {
 		t.Fatal(err)
 	}

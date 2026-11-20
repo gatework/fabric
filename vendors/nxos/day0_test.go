@@ -40,7 +40,7 @@ func TestDay0ParsesBackToDesired(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		cfg, err := nxos.ParseConfig(text)
+		cfg, err := nxos.ParseConfig(t.Context(), text)
 		if err != nil {
 			t.Fatal(err)
 		}

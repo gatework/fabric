@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gatework/go-netops/assess"
-	"github.com/gatework/go-netops/evidence"
+	"github.com/gatework/netops/assess"
+	"github.com/gatework/netops/evidence"
 
 	"github.com/gatework/fabric/adopt"
 	"github.com/gatework/fabric/check"

@@ -7,8 +7,8 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/gatework/go-netops/assess"
-	"github.com/gatework/go-netops/evidence"
+	"github.com/gatework/netops/assess"
+	"github.com/gatework/netops/evidence"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/baseline"
@@ -60,7 +60,7 @@ func (f *Fabric) Coverage() evidence.Coverage {
 		if len(f.Switches) == 0 {
 			status = evidence.StatusNotRequested
 		}
-		out[d] = status
+		out = out.With(d, status)
 	}
 	return out
 }
@@ -147,33 +147,19 @@ func NewAssessor(policy assess.Policy, verify assess.VerifyCommands) (*Assessor,
 	if err != nil {
 		return nil, fmt.Errorf("check: %w", err)
 	}
-	for id := range policy.Rules {
-		_, inS := sc.Lookup(id)
-		_, inF := fc.Lookup(id)
-		if !inS && !inF {
-			return nil, fmt.Errorf("check: policy names unknown rule %q", id)
-		}
+	if err := policy.Check(sc.IDs(), fc.IDs()); err != nil {
+		return nil, fmt.Errorf("check: %w", err)
 	}
-	se, err := assess.NewEngine(sc, split(policy, sc), verify)
+	o := assess.Options{Verify: verify, Partial: true}
+	se, err := assess.NewEngine(sc, policy, o)
 	if err != nil {
 		return nil, fmt.Errorf("check: %w", err)
 	}
-	fe, err := assess.NewEngine(fc, split(policy, fc), verify)
+	fe, err := assess.NewEngine(fc, policy, o)
 	if err != nil {
 		return nil, fmt.Errorf("check: %w", err)
 	}
 	return &Assessor{switches: se, fabrics: fe}, nil
-}
-
-// split keeps the policy entries of one catalog.
-func split[M any](p assess.Policy, c *assess.Catalog[M]) assess.Policy {
-	out := assess.Policy{OnlyEnabled: p.OnlyEnabled, Rules: map[assess.RuleID]assess.RulePolicy{}}
-	for id, rp := range p.Rules {
-		if _, ok := c.Lookup(id); ok {
-			out.Rules[id] = rp
-		}
-	}
-	return out
 }
 
 // Run assesses every fabric and its switches.

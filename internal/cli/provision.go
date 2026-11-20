@@ -8,8 +8,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/gatework/go-netops/evidence"
-	"github.com/gatework/go-netops/store"
+	"github.com/gatework/netops/evidence"
+	"github.com/gatework/netops/store"
 	"github.com/gatework/set"
 
 	"github.com/gatework/fabric"
@@ -73,14 +73,14 @@ func (f *changeFlags) run(cmd *cobra.Command, e env, req provision.Request) erro
 	if out.Bundle == nil || len(out.Bundle.Items) == 0 {
 		return nil
 	}
-	st, err := store.New(f.output, store.Options{})
+	st, err := store.NewBatch(f.output, time.Now())
 	if err != nil {
 		return err
 	}
 	if err := workflow.WriteBundle(cmd.Context(), st, out.Bundle); err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(e.stdout, "计划 %s 已写入 %s\n下发：fabric deploy --plan %s --apply --confirm %s\n", out.Bundle.ID, st.Directory(), st.Directory(), out.Bundle.ID)
+	_, _ = fmt.Fprintf(e.stdout, "计划 %s 已写入 %s\n下发：fabric deploy --plan %s --apply --confirm %s\n", out.Bundle.ID, st.Root(), st.Root(), out.Bundle.ID)
 	return nil
 }
 

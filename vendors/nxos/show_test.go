@@ -3,7 +3,7 @@ package nxos_test
 import (
 	"testing"
 
-	"github.com/gatework/go-netops/evidence"
+	"github.com/gatework/netops/evidence"
 
 	"github.com/gatework/fabric/device"
 	"github.com/gatework/fabric/vendors/nxos"
@@ -12,7 +12,7 @@ import (
 func observe(tb testing.TB, dim evidence.Dimension, fixture string) *device.Switch {
 	tb.Helper()
 	sw := &device.Switch{}
-	nxos.Observe(sw, dim, readFixture(tb, fixture))
+	nxos.Observe(tb.Context(), sw, dim, readFixture(tb, fixture))
 	if s := sw.Coverage.Status(dim); s != evidence.StatusComplete {
 		tb.Fatalf("%s status %s issues %+v", dim, s, sw.Issues[dim])
 	}
@@ -113,15 +113,15 @@ func TestObserveRoutes(t *testing.T) {
 func TestObserveRejectsAndUnknownLines(t *testing.T) {
 	t.Parallel()
 	sw := &device.Switch{}
-	nxos.Observe(sw, device.DimVPC, "% Invalid command at '^' marker.")
+	nxos.Observe(t.Context(), sw, device.DimVPC, "% Invalid command at '^' marker.")
 	if s := sw.Coverage.Status(device.DimVPC); s != evidence.StatusUnsupported {
 		t.Errorf("rejected status = %s", s)
 	}
-	nxos.Observe(sw, device.DimNVEPeers, "garbage without header")
+	nxos.Observe(t.Context(), sw, device.DimNVEPeers, "garbage without header")
 	if s := sw.Coverage.Status(device.DimNVEPeers); s != evidence.StatusPartial {
 		t.Errorf("headerless status = %s", s)
 	}
-	nxos.Observe(sw, device.DimNVEPeers, "")
+	nxos.Observe(t.Context(), sw, device.DimNVEPeers, "")
 	if s := sw.Coverage.Status(device.DimNVEPeers); s != evidence.StatusComplete {
 		t.Errorf("empty status = %s", s)
 	}
@@ -129,7 +129,7 @@ func TestObserveRejectsAndUnknownLines(t *testing.T) {
 
 func TestAssembleSkipsAbsentFeatures(t *testing.T) {
 	t.Parallel()
-	sw := nxos.Assemble(device.Identity{}, map[string]string{"show running-config": readFixture(t, "spine.cfg")})
+	sw := nxos.Assemble(t.Context(), device.Identity{}, map[string]string{"show running-config": readFixture(t, "spine.cfg")})
 	if sw.Name != "DC1-SPN01" {
 		t.Errorf("name = %q", sw.Name)
 	}
@@ -149,7 +149,7 @@ func FuzzObserve(f *testing.F) {
 		probes := nxos.Probes()
 		p := probes[int(pick)%len(probes)]
 		sw := &device.Switch{}
-		nxos.Observe(sw, p.Dimension, text)
+		nxos.Observe(t.Context(), sw, p.Dimension, text)
 		if !sw.Coverage.Status(p.Dimension).Valid() {
 			t.Fatalf("invalid status for %s", p.Dimension)
 		}

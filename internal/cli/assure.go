@@ -8,7 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/gatework/go-netops/evidence"
+	"github.com/gatework/netops/evidence"
 
 	"github.com/gatework/fabric/capacity"
 	"github.com/gatework/fabric/device"

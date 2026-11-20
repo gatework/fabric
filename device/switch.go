@@ -3,7 +3,7 @@ package device
 import (
 	"net/netip"
 
-	"github.com/gatework/go-netops/evidence"
+	"github.com/gatework/netops/evidence"
 
 	"github.com/gatework/fabric"
 )

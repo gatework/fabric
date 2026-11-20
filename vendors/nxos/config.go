@@ -1,6 +1,7 @@
 package nxos
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -8,8 +9,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/gatework/go-netops/evidence"
-	"github.com/gatework/parser"
+	"github.com/gatework/netops/evidence"
+	"github.com/gatework/netops/parse"
 
 	"github.com/gatework/fabric/device"
 )
@@ -18,20 +19,20 @@ import (
 var ErrMalformed = errors.New("nxos: malformed input")
 
 // Limits bounds accepted configuration text.
-var configLimits = parser.Limits{MaxBytes: 32 << 20, MaxLines: 500_000}
+var configLimits = parse.Limits{MaxBytes: 32 << 20, MaxLines: 500_000}
 
 // ParseConfig parses "show running-config" output. Lines the model does not
 // cover are counted by keyword in Config.Unparsed and never fail the parse.
-func ParseConfig(text string) (*device.Config, error) {
+func ParseConfig(ctx context.Context, text string) (*device.Config, error) {
 	if !utf8.ValidString(text) {
 		return nil, fmt.Errorf("%w: invalid UTF-8", ErrMalformed)
 	}
-	content, err := parser.New(text, configLimits)
+	content, err := parse.New(ctx, text, configLimits)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrMalformed, err)
 	}
 	cfg := device.NewConfig()
-	cfg.Fingerprint = evidence.Digest([]byte(fingerprintText(text)))
+	cfg.Fingerprint = string(evidence.DigestString(fingerprintText(text)))
 	cfg.Management.DomainLookup = true
 	p := &configParser{cfg: cfg}
 	for _, n := range buildTree(content) {
@@ -132,7 +133,7 @@ func atoi(s string) int {
 // digest returns a short, non-reversible tag for a secret so that drift in
 // shared keys is detectable without storing them.
 func digest(secret string) string {
-	return evidence.Digest([]byte(secret))[:16]
+	return string(evidence.DigestString(secret))[:16]
 }
 
 // after returns the word following key in fields, or "".

@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/gatework/go-netops/assess"
+	"github.com/gatework/netops/assess"
 
 	"github.com/gatework/fabric/adopt"
 	"github.com/gatework/fabric/check"
@@ -95,7 +95,7 @@ func Check(w io.Writer, rep check.Report, opt CheckOptions) error {
 // describe prefixes a finding with the switch it concerns unless the
 // detail already names it.
 func describe(f assess.Finding) string {
-	for s := &f.Subject; s != nil; s = s.Parent {
+	for _, s := range slices.Backward(f.Subject.Parts()) {
 		if s.Kind == "switch" && !strings.Contains(f.Detail, s.Key) {
 			return s.Key + "：" + f.Detail
 		}

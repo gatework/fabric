@@ -10,8 +10,8 @@
 // only when the simulated configuration satisfies the desired state.
 //
 // A [Changeset] binds a switch's operations to a vendor [Renderer] and
-// implements the go-netops change.Change contract, so plans are persisted,
-// re-rendered on load and checked before and after execution by go-netops.
+// implements the netops change.Change contract, so plans are persisted,
+// decoded from reviewed envelopes on load and checked before and after execution by netops.
 //
 // The package performs no I/O and contains no device syntax.
 package plan

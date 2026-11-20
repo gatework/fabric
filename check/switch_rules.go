@@ -6,8 +6,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/gatework/go-netops/assess"
-	"github.com/gatework/go-netops/evidence"
+	"github.com/gatework/netops/assess"
+	"github.com/gatework/netops/evidence"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/device"
@@ -43,14 +43,22 @@ const (
 type switchEval func(sw *device.Switch, sub assess.Subject) []assess.Finding
 
 func switchRule(id assess.RuleID, title string, sev assess.Severity, cat assess.Category, needs []evidence.Dimension, eval switchEval) assess.Rule[*device.Switch] {
-	return assess.NewRule(assess.RuleMeta{ID: id, Title: title, Severity: sev, Category: cat, Requires: needs, Verify: needs},
+	return assess.Check(assess.Meta{ID: id, Title: title, Severity: sev, Category: cat, Requires: needs, Verify: needs},
 		func(in assess.Input[*device.Switch]) []assess.Finding {
 			return eval(in.Model, switchSubject(in.Model))
 		})
 }
 
 func found(sub assess.Subject, detail string, expected, actual any) assess.Finding {
-	return assess.Finding{Subject: sub, Detail: detail, Expected: expected, Actual: actual}
+	return assess.Finding{Subject: sub, Detail: detail, Expected: text(expected), Actual: text(actual)}
+}
+
+// text renders a finding value; absent values render empty.
+func text(v any) string {
+	if v == nil {
+		return ""
+	}
+	return fmt.Sprint(v)
 }
 
 // SwitchRules returns the switch catalog in evaluation order.

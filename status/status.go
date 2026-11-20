@@ -6,8 +6,8 @@ import (
 	"net/netip"
 	"slices"
 
-	"github.com/gatework/go-netops/assess"
-	"github.com/gatework/go-netops/evidence"
+	"github.com/gatework/netops/assess"
+	"github.com/gatework/netops/evidence"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/device"
@@ -143,9 +143,9 @@ func region(in Input) Region {
 func findingsBySwitch(fs []assess.Finding) map[string][]assess.Finding {
 	out := map[string][]assess.Finding{}
 	for _, f := range fs {
-		for s := &f.Subject; s != nil; s = s.Parent {
-			if s.Kind == "switch" {
-				out[s.Key] = append(out[s.Key], f)
+		for _, p := range slices.Backward(f.Subject.Parts()) {
+			if p.Kind == "switch" {
+				out[p.Key] = append(out[p.Key], f)
 				break
 			}
 		}

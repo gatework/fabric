@@ -1,10 +1,11 @@
 package synth_test
 
 import (
+	"context"
 	"strings"
 	"testing"
 
-	"github.com/gatework/go-netops/assess"
+	"github.com/gatework/netops/assess"
 
 	"github.com/gatework/fabric/check"
 	"github.com/gatework/fabric/device"
@@ -23,7 +24,7 @@ func assemble(f *synth.Fleet) []*device.Switch {
 	r := f.Intent.Regions[0]
 	var out []*device.Switch
 	for _, s := range r.Switches {
-		out = append(out, nxos.Assemble(device.Identity{Name: s.Name, Mgmt: s.Mgmt.Addr, Region: r.Name, Role: s.Role}, f.Outputs[s.Mgmt.Addr]))
+		out = append(out, nxos.Assemble(context.Background(), device.Identity{Name: s.Name, Mgmt: s.Mgmt.Addr, Region: r.Name, Role: s.Role}, f.Outputs[s.Mgmt.Addr]))
 	}
 	return out
 }

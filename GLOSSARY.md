@@ -18,9 +18,9 @@
 | **Setting** | One scalar baseline value (timezone, `vpc.peer_gateway`, …) with a uniform get/set on the model. |
 | **Desired** | The target state of one switch's managed objects, compiled from intent and baseline. |
 | **Op** | One typed change to one managed object, carrying its planned **Have** and target **Want** state. |
-| **Changeset** | A switch's ordered ops bound to a renderer; implements go-netops `change.Change`. |
+| **Changeset** | A switch's ordered ops bound to a renderer; implements netops `change.Change`. |
 | **Managed scope** | Only objects the desired state mentions are changed; others are reported, never removed, unless pruning. |
-| **Bundle** | A reviewed multi-switch plan: per-switch go-netops plan envelopes, review scripts and waves; identified by a digest. |
+| **Bundle** | A reviewed multi-switch plan: per-switch netops plan envelopes, review scripts and waves; identified by a digest. |
 | **Wave** | Switches changed concurrently. Canary first, leaves (vPC peers apart), then borders and spines one at a time. |
 | **Gate** | The post-change comparison of NVE peers, EVPN sessions, OSPF adjacencies and vPC peer health. |
 | **Checkpoint** | An NX-OS configuration checkpoint taken before writing; the target of `fabric rollback`. |

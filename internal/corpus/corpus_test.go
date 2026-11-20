@@ -8,8 +8,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/gatework/go-netops/assess"
-	"github.com/gatework/go-netops/evidence"
+	"github.com/gatework/netops/assess"
+	"github.com/gatework/netops/evidence"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/governance"
@@ -40,7 +40,8 @@ func TestCorpusParse(t *testing.T) {
 	status := map[evidence.Status]int{}
 	unparsed := 0
 	for _, sw := range f.Switches {
-		for d, s := range sw.Coverage {
+		for _, d := range sw.Coverage.Dimensions() {
+			s := sw.Coverage.Status(d)
 			status[s]++
 			if !s.Complete() && s != evidence.StatusNotRequested {
 				t.Errorf("a switch has %s %s", d, s)
@@ -256,7 +257,7 @@ func TestCorpusProvisioning(t *testing.T) {
 			t.Errorf("region %d day-0: %v", i, err)
 			continue
 		}
-		cfg, _ := nxos.ParseConfig(text)
+		cfg, _ := nxos.ParseConfig(t.Context(), text)
 		if rest := plan.Diff(d, cfg, plan.Options{}); len(rest) != 0 {
 			t.Errorf("region %d day-0 leaves %d operations", i, len(rest))
 		}

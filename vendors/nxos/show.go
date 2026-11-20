@@ -1,11 +1,12 @@
 package nxos
 
 import (
+	"context"
 	"strings"
 	"unicode/utf8"
 
-	"github.com/gatework/go-netops/evidence"
-	"github.com/gatework/go-netops/textscan"
+	"github.com/gatework/netops/evidence"
+	"github.com/gatework/netops/parse"
 
 	"github.com/gatework/fabric/device"
 )
@@ -22,7 +23,7 @@ const (
 
 // result is what one show parser produced.
 type result struct {
-	scan textscan.Scanner
+	scan parse.Scanner
 	// header is set once a table header was recognized; a non-empty
 	// output without a header is not understood.
 	header bool
@@ -59,21 +60,18 @@ func dashes(t string) bool {
 
 // Observe parses the output of the command collected for dim and records
 // it in the switch: the state table, the coverage status and issues.
-func Observe(sw *device.Switch, dim evidence.Dimension, text string) {
-	if sw.Coverage == nil {
-		sw.Coverage = evidence.Coverage{}
-	}
+func Observe(ctx context.Context, sw *device.Switch, dim evidence.Dimension, text string) {
 	if sw.Issues == nil {
 		sw.Issues = map[evidence.Dimension][]evidence.Issue{}
 	}
-	status, issues := observe(sw, dim, text)
-	sw.Coverage[dim] = status
+	status, issues := observe(ctx, sw, dim, text)
+	sw.Coverage = sw.Coverage.With(dim, status)
 	if len(issues) > 0 {
 		sw.Issues[dim] = issues
 	}
 }
 
-func observe(sw *device.Switch, dim evidence.Dimension, text string) (evidence.Status, []evidence.Issue) {
+func observe(ctx context.Context, sw *device.Switch, dim evidence.Dimension, text string) (evidence.Status, []evidence.Issue) {
 	if !utf8.ValidString(text) {
 		return evidence.StatusFailed, []evidence.Issue{{Code: IssueInvalidUTF8}}
 	}
@@ -81,7 +79,7 @@ func observe(sw *device.Switch, dim evidence.Dimension, text string) (evidence.S
 		return evidence.StatusUnsupported, []evidence.Issue{{Code: IssueUnsupported}}
 	}
 	if dim == device.DimConfig {
-		cfg, err := ParseConfig(text)
+		cfg, err := ParseConfig(ctx, text)
 		if err != nil {
 			return evidence.StatusFailed, []evidence.Issue{{Code: IssueConfigMalformed}}
 		}

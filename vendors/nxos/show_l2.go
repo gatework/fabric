@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/gatework/go-netops/textscan"
+	"github.com/gatework/netops/parse"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/device"
@@ -17,7 +17,7 @@ func parseVPC(st *device.State, text string) *result {
 	v := &device.VPCStatus{PeerLinks: []device.VPCLink{}, Members: []device.VPCMember{}}
 	section := "head"
 	var cols columns
-	for line := range textscan.Lines(text) {
+	for line := range parse.Lines(text) {
 		raw := strings.TrimRight(line.Text, " ")
 		t := strings.TrimSpace(raw)
 		switch {
@@ -41,10 +41,10 @@ func parseVPC(st *device.State, text string) *result {
 			vpcPeerRow(v, cols.cells(raw))
 		case section == "members" && len(cols.starts) == 6:
 			if !vpcMemberRow(v, cols.cells(raw)) {
-				r.scan.Unparsed(line.Number)
+				r.scan.Issue(parse.IssueUnparsed, line.Number)
 			}
 		default:
-			r.scan.Unparsed(line.Number)
+			r.scan.Issue(parse.IssueUnparsed, line.Number)
 		}
 	}
 	if r.header {
@@ -110,7 +110,7 @@ func vpcHead(v *device.VPCStatus, key, val string) {
 func parseInterfaces(st *device.State, text string) *result {
 	r := &result{empty: blank(text)}
 	st.Interfaces = []device.InterfaceStatus{}
-	for line := range textscan.Lines(text) {
+	for line := range parse.Lines(text) {
 		t := strings.TrimSpace(line.Text)
 		f := strings.Fields(t)
 		if t == "" || dashes(t) {
@@ -122,12 +122,12 @@ func parseInterfaces(st *device.State, text string) *result {
 				r.header = true
 				continue
 			}
-			r.scan.Unparsed(line.Number)
+			r.scan.Issue(parse.IssueUnparsed, line.Number)
 			continue
 		}
 		s, ok := interfaceRow(name, kind, f)
 		if !ok {
-			r.scan.Unparsed(line.Number)
+			r.scan.Issue(parse.IssueUnparsed, line.Number)
 			continue
 		}
 		st.Interfaces = append(st.Interfaces, s)
@@ -179,7 +179,7 @@ func parsePortChannels(st *device.State, text string) *result {
 	r := &result{empty: blank(text)}
 	st.PortChannels = []device.PortChannel{}
 	legend := true
-	for line := range textscan.Lines(text) {
+	for line := range parse.Lines(text) {
 		t := strings.TrimSpace(line.Text)
 		switch {
 		case t == "" || dashes(t):
@@ -196,7 +196,7 @@ func parsePortChannels(st *device.State, text string) *result {
 			last := &st.PortChannels[len(st.PortChannels)-1]
 			last.Members = addMembers(last.Members, t)
 		default:
-			r.scan.Unparsed(line.Number)
+			r.scan.Issue(parse.IssueUnparsed, line.Number)
 		}
 	}
 	return r
@@ -222,7 +222,7 @@ func parseMACs(st *device.State, text string) *result {
 	st.MACs = make([]device.MACEntry, 0, strings.Count(text, "\n"))
 	legend := true
 	var tok tokens
-	for line := range textscan.Lines(text) {
+	for line := range parse.Lines(text) {
 		t := strings.TrimSpace(line.Text)
 		switch {
 		case t == "" || dashes(t):
@@ -232,7 +232,7 @@ func parseMACs(st *device.State, text string) *result {
 		default:
 			e, ok := macRow(tok.split(t))
 			if !ok {
-				r.scan.Unparsed(line.Number)
+				r.scan.Issue(parse.IssueUnparsed, line.Number)
 				continue
 			}
 			st.MACs = append(st.MACs, e)

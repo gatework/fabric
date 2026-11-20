@@ -3,9 +3,9 @@ package baseline_test
 import (
 	"testing"
 
-	"github.com/gatework/go-netops/assess"
-	"github.com/gatework/go-netops/drift"
-	"github.com/gatework/go-netops/evidence"
+	"github.com/gatework/netops/assess"
+	"github.com/gatework/netops/drift"
+	"github.com/gatework/netops/evidence"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/baseline"
@@ -103,7 +103,7 @@ func TestDeriveMajority(t *testing.T) {
 			c.VPC = &device.VPCDomain{ID: 1, PeerGateway: true}
 		}
 		sw := &device.Switch{Identity: device.Identity{Role: fabric.RoleLeaf}, Config: c}
-		sw.Coverage = map[evidence.Dimension]evidence.Status{device.DimConfig: evidence.StatusComplete}
+		sw.Coverage = evidence.Coverage{}.With(device.DimConfig, evidence.StatusComplete)
 		return sw
 	}
 	p := baseline.Derive([]baseline.Group{

@@ -10,8 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gatework/go-netops/change"
-	"github.com/gatework/go-netops/evidence"
+	"github.com/gatework/netops/change"
+	ndevice "github.com/gatework/netops/device"
+	"github.com/gatework/netops/evidence"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/baseline"
@@ -104,6 +105,9 @@ func Plan(req PlanRequest) (*Bundle, error) {
 	if req.Fleet.Intent == nil {
 		return nil, ErrNoIntent
 	}
+	if req.Now.IsZero() {
+		req.Now = time.Now()
+	}
 	b := &Bundle{CreatedAt: req.Now.UTC(), Refused: []Refusal{}}
 	var chosen []*device.Switch
 	for _, sw := range req.Fleet.Switches {
@@ -187,7 +191,7 @@ func planSwitch(req PlanRequest, sw *device.Switch) (*Item, error) {
 	if err := plan.Safe(sw.Config, ops); err != nil {
 		return nil, err
 	}
-	return newItem(r, s, sw, ops)
+	return newItem(r, s, sw, ops, req.Now)
 }
 
 // operations plans the full desired state, or only the change from
@@ -210,12 +214,14 @@ func operations(req PlanRequest, sw *device.Switch, d *plan.Desired, opt plan.Op
 	return plan.Delta(before, d, sw.Config, opt)
 }
 
-func newItem(r *fabric.Region, s *fabric.Switch, sw *device.Switch, ops []plan.Op) (*Item, error) {
+func newItem(r *fabric.Region, s *fabric.Switch, sw *device.Switch, ops []plan.Op, at time.Time) (*Item, error) {
 	cs, err := plan.NewChangeset(ops, nxos.Renderer{})
 	if err != nil {
 		return nil, err
 	}
-	p, err := change.NewPlan(change.Target{Host: sw.Mgmt.String(), Name: sw.Name, Platform: nxos.Platform}, sw.Config.Fingerprint, change.Change[*device.Config](cs))
+	meta := change.Meta{ID: "fabric-" + safe(sw.Name), Created: at.UTC()}
+	target := ndevice.Device{ID: sw.Mgmt.String(), Name: sw.Name, Mgmt: sw.Mgmt, Platform: nxos.Platform}
+	p, err := plan.NewPlan(meta, target, sw.Config, cs)
 	if err != nil {
 		return nil, fmt.Errorf("workflow: %w", err)
 	}
@@ -257,7 +263,7 @@ func bundleID(b *Bundle) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("workflow: %w", err)
 	}
-	return evidence.Digest(body)[:12], nil
+	return string(evidence.DigestOf(body))[:12], nil
 }
 
 func riskPolicy(p governance.Policy) governance.Policy {

@@ -9,7 +9,7 @@ import (
 	"net/netip"
 	"slices"
 
-	"github.com/gatework/go-netops/evidence"
+	"github.com/gatework/netops/evidence"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/adapter/snapshot"
@@ -59,7 +59,7 @@ func LoadSnapshot(ctx context.Context, dir string, in *fabric.Intent, opt LoadOp
 		return nil, err
 	}
 	keep := commandFilter(opt.Dimensions)
-	switches, errs := parallel.Map(ctx, opt.Workers, dirs, func(_ context.Context, d string) (*device.Switch, error) {
+	switches, errs := parallel.Map(ctx, opt.Workers, dirs, func(ctx context.Context, d string) (*device.Switch, error) {
 		c, err := snapshot.ReadSome(d, keep)
 		if err != nil {
 			return nil, err
@@ -68,7 +68,7 @@ func LoadSnapshot(ctx context.Context, dir string, in *fabric.Intent, opt LoadOp
 		for cmd, o := range c.Outputs {
 			outs[cmd] = o.Text
 		}
-		return nxos.Assemble(device.Identity{Mgmt: c.Mgmt}, outs), nil
+		return nxos.Assemble(ctx, device.Identity{Mgmt: c.Mgmt}, outs), nil
 	})
 	if err := errors.Join(errs...); err != nil {
 		return nil, err

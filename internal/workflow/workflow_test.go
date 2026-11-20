@@ -4,21 +4,21 @@ import (
 	"context"
 	"testing"
 
-	"github.com/gatework/go-netops/store"
+	"github.com/gatework/netops/store"
 
 	"github.com/gatework/fabric/internal/workflow"
 )
 
 func writeBundle(tb testing.TB, b *workflow.Bundle) string {
 	tb.Helper()
-	st, err := store.New(tb.TempDir(), store.Options{})
+	st, err := store.Open(tb.TempDir())
 	if err != nil {
 		tb.Fatal(err)
 	}
 	if err := workflow.WriteBundle(context.Background(), st, b); err != nil {
 		tb.Fatal(err)
 	}
-	return st.Directory()
+	return st.Root()
 }
 
 func TestPlanRefusesIncompleteEvidence(t *testing.T) {

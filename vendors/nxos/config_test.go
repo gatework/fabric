@@ -24,7 +24,7 @@ func readFixture(tb testing.TB, name string) string {
 
 func parseLeaf(tb testing.TB) *device.Config {
 	tb.Helper()
-	cfg, err := nxos.ParseConfig(readFixture(tb, "leaf.cfg"))
+	cfg, err := nxos.ParseConfig(tb.Context(), readFixture(tb, "leaf.cfg"))
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -159,15 +159,15 @@ func TestParseConfigNeverStoresSecrets(t *testing.T) {
 func TestFingerprintIgnoresVolatileHeader(t *testing.T) {
 	t.Parallel()
 	text := readFixture(t, "leaf.cfg")
-	a, err := nxos.ParseConfig(text)
+	a, err := nxos.ParseConfig(t.Context(), text)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := nxos.ParseConfig(strings.Replace(text, "10:00:01", "11:59:59", 1))
+	b, err := nxos.ParseConfig(t.Context(), strings.Replace(text, "10:00:01", "11:59:59", 1))
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := nxos.ParseConfig(strings.Replace(text, "mtu 9216", "mtu 9000", 1))
+	c, err := nxos.ParseConfig(t.Context(), strings.Replace(text, "mtu 9216", "mtu 9000", 1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestFingerprintIgnoresVolatileHeader(t *testing.T) {
 
 func TestParseConfigRejectsInvalidUTF8(t *testing.T) {
 	t.Parallel()
-	if _, err := nxos.ParseConfig("hostname \xff"); err == nil {
+	if _, err := nxos.ParseConfig(t.Context(), "hostname \xff"); err == nil {
 		t.Fatal("invalid UTF-8 accepted")
 	}
 }
@@ -191,7 +191,7 @@ func FuzzParseConfig(f *testing.F) {
 	f.Add(readFixture(f, "spine.cfg"))
 	f.Add("interface nve1\n  member vni 1 associate-vrf\nvlan 1-5,x\n")
 	f.Fuzz(func(t *testing.T, text string) {
-		cfg, err := nxos.ParseConfig(text)
+		cfg, err := nxos.ParseConfig(t.Context(), text)
 		if err != nil {
 			return
 		}

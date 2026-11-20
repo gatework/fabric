@@ -3,7 +3,7 @@ package nxos
 import (
 	"strings"
 
-	"github.com/gatework/go-netops/textscan"
+	"github.com/gatework/netops/parse"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/device"
@@ -36,7 +36,7 @@ func parseL2Routes(st *device.State, text string) *result {
 	st.L2Routes = []device.L2Route{}
 	legend := true
 	var tok tokens
-	for line := range textscan.Lines(text) {
+	for line := range parse.Lines(text) {
 		t := strings.TrimSpace(line.Text)
 		switch {
 		case t == "" || dashes(t):
@@ -55,7 +55,7 @@ func parseL2Routes(st *device.State, text string) *result {
 				Sequence: max(atoiStrict(f[4]), 0), NextHops: nextHops(f[5:]),
 			})
 		default:
-			r.scan.Unparsed(line.Number)
+			r.scan.Issue(parse.IssueUnparsed, line.Number)
 		}
 	}
 	return r
@@ -68,7 +68,7 @@ func parseMACIPs(st *device.State, text string) *result {
 	st.MACIPs = []device.MACIPRoute{}
 	legend, ipFirst := true, true
 	var tok tokens
-	for line := range textscan.Lines(text) {
+	for line := range parse.Lines(text) {
 		t := strings.TrimSpace(line.Text)
 		switch {
 		case t == "" || dashes(t):
@@ -92,7 +92,7 @@ func parseMACIPs(st *device.State, text string) *result {
 			e.NextHops = nextHops(f[6:])
 			st.MACIPs = append(st.MACIPs, e)
 		default:
-			r.scan.Unparsed(line.Number)
+			r.scan.Issue(parse.IssueUnparsed, line.Number)
 		}
 	}
 	return r
@@ -109,7 +109,7 @@ func parseCDP(st *device.State, text string) *result {
 		}
 		cur = nil
 	}
-	for line := range textscan.Lines(text) {
+	for line := range parse.Lines(text) {
 		t := strings.TrimSpace(line.Text)
 		switch {
 		case strings.HasPrefix(t, "Device ID:"):

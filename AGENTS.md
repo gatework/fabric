@@ -12,7 +12,7 @@ Not in production: no compatibility promise (GEN-1). fabric replaces go-vxlan ([
 
 - The root package `fabric` is the intent model; `device` is the observed model. Neither performs I/O. `architecture.yaml` enforces the direction; register every new package there first.
 - `vendors/nxos` owns all NX-OS syntax: parsing configuration and show output into `device`, and rendering `plan` operations into commands. Nothing outside it contains CLI text.
-- `adapter/netconnector` is the only package that imports net-connector; `adapter/snapshot` is the only package that reads capture directories.
+- `adapter/netconnector` is the only package that holds device sessions, and `internal/bootstrap` the only one that assembles the net-connector dialer (SSH transport, built-in registry, credentials); `adapter/snapshot` is the only package that reads capture directories.
 - Vendors and adapters are wired explicitly in `internal/bootstrap`; no `init` registration.
 
 ## Semantics that must not regress

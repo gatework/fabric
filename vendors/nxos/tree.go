@@ -3,7 +3,7 @@ package nxos
 import (
 	"strings"
 
-	"github.com/gatework/parser"
+	"github.com/gatework/netops/parse"
 )
 
 // node is one configuration line and the lines indented beneath it.
@@ -43,7 +43,7 @@ func (n *node) has(words ...string) bool {
 // buildTree turns indented configuration into a forest. Blank lines,
 // comments ("!") and the volatile header are skipped. Indentation of any
 // width nests a line under the closest less-indented line.
-func buildTree(content *parser.Content) []*node {
+func buildTree(content *parse.Content) []*node {
 	type frame struct {
 		indent int
 		n      *node

@@ -1,11 +1,11 @@
 package nxos
 
 import (
+	"context"
 	"errors"
 	"fmt"
-	"strings"
 
-	"github.com/gatework/go-netops/evidence"
+	"github.com/gatework/netops/evidence"
 
 	"github.com/gatework/fabric/device"
 )
@@ -41,9 +41,6 @@ func Probes() []Probe {
 	}
 }
 
-// Preparation lists the commands that make output unpaged and unwrapped.
-func Preparation() []string { return []string{"terminal length 0", "terminal width 511"} }
-
 // Profile resolves NX-OS commands for dimensions. It satisfies
 // assess.VerifyCommands.
 type Profile struct{}
@@ -56,6 +53,15 @@ func (Profile) Command(dim evidence.Dimension) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%w: %s", ErrUnknownDimension, dim)
+}
+
+// Commands returns the command that re-checks dim; it implements
+// assess.VerifyCommands.
+func (p Profile) Commands(dim evidence.Dimension) []string {
+	if c, err := p.Command(dim); err == nil {
+		return []string{c}
+	}
+	return nil
 }
 
 // Absent reports whether the configuration proves the dimension has
@@ -82,36 +88,18 @@ func Absent(cfg *device.Config, dim evidence.Dimension) bool {
 // Assemble builds a switch from command outputs keyed by command. A
 // dimension whose command is missing is complete when the configuration
 // proves it absent, and not requested otherwise.
-func Assemble(id device.Identity, outputs map[string]string) *device.Switch {
-	sw := &device.Switch{Identity: id, Coverage: evidence.Coverage{}}
+func Assemble(ctx context.Context, id device.Identity, outputs map[string]string) *device.Switch {
+	sw := &device.Switch{Identity: id}
 	for _, p := range Probes() {
 		text, ok := outputs[p.Command]
 		switch {
 		case ok:
-			Observe(sw, p.Dimension, text)
+			Observe(ctx, sw, p.Dimension, text)
 		case Absent(sw.Config, p.Dimension):
-			sw.Coverage[p.Dimension] = evidence.StatusComplete
+			sw.Coverage = sw.Coverage.With(p.Dimension, evidence.StatusComplete)
 		default:
-			sw.Coverage[p.Dimension] = evidence.StatusNotRequested
+			sw.Coverage = sw.Coverage.With(p.Dimension, evidence.StatusNotRequested)
 		}
 	}
 	return sw
-}
-
-// CheckpointCommand returns the exec command that records a checkpoint.
-func CheckpointCommand(name string) string { return "checkpoint " + name }
-
-// RollbackCommand returns the exec command that atomically restores a
-// checkpoint: either every difference applies or none does.
-func RollbackCommand(name string) string {
-	return "rollback running-config checkpoint " + name + " atomic"
-}
-
-// Confirmed reports whether checkpoint or rollback output shows success.
-func Confirmed(output string) bool {
-	lower := strings.ToLower(output)
-	if strings.Contains(lower, "fail") || strings.Contains(lower, "error") || strings.Contains(lower, "invalid") {
-		return false
-	}
-	return strings.Contains(lower, "done") || strings.Contains(lower, "success") || strings.Contains(lower, "completed")
 }

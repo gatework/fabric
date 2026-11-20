@@ -25,7 +25,7 @@ The intent is what the fabric should carry; the baseline is how every switch mus
 | `plan` | Compile, Desired, Op, Diff, Order, Simulate, Converges, Safe, Changeset | fabric, device |
 | `baseline` | Profile, Resolve, Check, Desired, Derive | fabric, device, plan |
 | `adopt` | draft intent from observation, conflicts | fabric, device |
-| `check` | switch and fabric rule catalogs on go-netops assess | fabric, device, plan, baseline |
+| `check` | switch and fabric rule catalogs on netops assess | fabric, device, plan, baseline |
 | `rollout` | waves and health gates | fabric, device, plan |
 | `report` | Chinese text for findings and conflicts | domain packages |
 | `vendors/nxos` | all NX-OS syntax: parse config and show, render ops, profile | fabric, device, plan |
@@ -45,7 +45,7 @@ observe   outputs ──nxos.Assemble──▶ device.Switch {Config, State, Cov
 check     Fabric{switches, intent, baseline, previous} ──assess──▶ findings (skipped ≠ healthy)
 import    switches ──adopt──▶ draft Region + conflicts
 plan      Compile(region, switch) ⊕ baseline.Desired ─Diff─▶ ops ─Converges/Safe─▶ Changeset
-          ─go-netops change.NewPlan─▶ envelope + review script + rollback ─rollout.Schedule─▶ waves
+          ─netops change.NewPlan─▶ envelope + review script + rollback ─rollout.Schedule─▶ waves
 deploy    per wave: health → checkpoint+read → CheckBefore → apply.Run → Verify → health gate
           any non-verified switch stops later waves; rollback is explicit
 ```
@@ -56,7 +56,7 @@ Switch rules (23): evidence gaps; incomplete VNI segments; VNI used as L2 and L3
 
 Fabric rules (11): VLAN→VNI mapping consensus; per-VNI gateway and VRF consensus; anycast gateway MAC; tenant L3VNI; VTEP reachability (each VTEP sees every other VTEP address); route-reflector sessions; duplicate router-ids and VTEP addresses; BGP template naming; intent drift (with candidate operations); baseline drift; regressions against the previous collection.
 
-Every rule can be disabled, re-graded or tuned with a go-netops policy file (`--policy`).
+Every rule can be disabled, re-graded or tuned with a netops policy file (`--policy`).
 
 ## Day-2 operations (provisioning)
 

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v0.1.0 - 2026-11-20
+
+- 设备会话改由 net-connector v0.10.0 `connector` 提供（x/crypto/ssh 进程内实现，NX-OS 分页、检查点、回滚与保存由其 NX-OS 驱动负责）；`adapter/netconnector` 改写为基于 `connector.Dialer`，`vendors/nxos` 不再声明传输行为。
+- 移除 go-netops 依赖：下发改用 netops `apply.Run` + `change.Plan.Precheck`，执行记录写入 netops `store/journal`，快照、计划与报告目录改用 netops `store.NewBatch`（批次命名不变）。
+- `nxos.ParseConfig`/`Assemble`/`Observe` 接受 `context.Context`。
+
 ### 保障、治理、容量与性能
 
 - `status` 健康评分、`locate` 终端定位、`topology` 布线审计、`capacity` 容量、`report deploy` 变更复盘。

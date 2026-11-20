@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gatework/go-netops/change"
-	"github.com/gatework/go-netops/store"
+	"github.com/gatework/netops/change"
+	"github.com/gatework/netops/store"
 
 	"github.com/gatework/fabric/device"
 	"github.com/gatework/fabric/plan"
@@ -29,25 +29,32 @@ type manifest struct {
 }
 
 // WriteBundle publishes the bundle into the store directory: the
-// manifest, one go-netops plan envelope per switch, and review scripts.
+// manifest, one netops plan envelope per switch, and review scripts.
 func WriteBundle(ctx context.Context, st *store.Store, b *Bundle) error {
 	m := manifest{Bundle: *b, Files: map[string]string{}}
 	for _, it := range b.Items {
 		name := safe(it.Member.Name)
 		rel := "plans/" + name + ".json"
-		if err := st.PublishJSON(ctx, rel, it.Plan); err != nil {
+		env, err := it.Plan.Envelope()
+		if err != nil {
+			return fmt.Errorf("workflow: %w", err)
+		}
+		if _, err := st.WriteJSON(ctx, rel, env); err != nil {
 			return fmt.Errorf("workflow: %w", err)
 		}
 		m.Files[it.Member.Name] = rel
-		if err := st.Publish(ctx, "scripts/"+name+".cfg", []byte(it.Review)); err != nil {
+		if _, err := st.Write(ctx, "scripts/"+name+".cfg", []byte(it.Review)); err != nil {
 			return fmt.Errorf("workflow: %w", err)
 		}
-		rollback := strings.Join(it.Plan.Rollback(), "\n") + "\n"
-		if err := st.Publish(ctx, "scripts/"+name+".rollback.txt", []byte(rollback)); err != nil {
+		var rollback strings.Builder
+		for _, c := range it.Plan.Script().Rollback {
+			rollback.WriteString(c.Display() + "\n")
+		}
+		if _, err := st.Write(ctx, "scripts/"+name+".rollback.txt", []byte(rollback.String())); err != nil {
 			return fmt.Errorf("workflow: %w", err)
 		}
 	}
-	if err := st.PublishJSON(ctx, manifestName, m); err != nil {
+	if _, err := st.WriteJSON(ctx, manifestName, m); err != nil {
 		return fmt.Errorf("workflow: %w", err)
 	}
 	return nil
@@ -62,7 +69,7 @@ func safe(name string) string {
 	}, name)
 }
 
-// ReadBundle loads a plan directory. Every plan is re-rendered by go-netops
+// ReadBundle loads a plan directory. Every plan envelope is verified by netops
 // and the bundle identifier recomputed; any edit is rejected.
 func ReadBundle(dir string) (*Bundle, error) {
 	body, err := os.ReadFile(filepath.Join(dir, manifestName))
@@ -74,6 +81,10 @@ func ReadBundle(dir string) (*Bundle, error) {
 		return nil, fmt.Errorf("workflow: manifest: %w", err)
 	}
 	b := m.Bundle
+	codec, err := plan.Codec(nxos.Renderer{})
+	if err != nil {
+		return nil, fmt.Errorf("workflow: %w", err)
+	}
 	for _, it := range b.Items {
 		rel, ok := m.Files[it.Member.Name]
 		if !ok || strings.Contains(rel, "..") {
@@ -83,11 +94,11 @@ func ReadBundle(dir string) (*Bundle, error) {
 		if err != nil {
 			return nil, fmt.Errorf("workflow: %w", err)
 		}
-		p, err := change.DecodePlan(raw, plan.Decoder(nxos.Renderer{}))
+		p, err := codec.Decode(raw)
 		if err != nil {
 			return nil, fmt.Errorf("%w: %s: %w", ErrTampered, it.Member.Name, err)
 		}
-		if p.Target().Name != it.Member.Name || p.Target().Host != it.Mgmt {
+		if p.Target().Name != it.Member.Name || p.Target().Mgmt.String() != it.Mgmt {
 			return nil, fmt.Errorf("%w: %s plan targets another switch", ErrTampered, it.Member.Name)
 		}
 		it.Plan = p

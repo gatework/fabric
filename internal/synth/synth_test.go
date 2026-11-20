@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/gatework/go-netops/assess"
+	"github.com/gatework/netops/assess"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/check"
@@ -27,8 +27,9 @@ func TestGeneratedFabricIsHealthy(t *testing.T) {
 	r := f.Intent.Regions[0]
 	var switches []*device.Switch
 	for _, s := range r.Switches {
-		sw := nxos.Assemble(device.Identity{Name: s.Name, Mgmt: s.Mgmt.Addr, Region: r.Name, Role: s.Role}, f.Outputs[s.Mgmt.Addr])
-		for d, st := range sw.Coverage {
+		sw := nxos.Assemble(t.Context(), device.Identity{Name: s.Name, Mgmt: s.Mgmt.Addr, Region: r.Name, Role: s.Role}, f.Outputs[s.Mgmt.Addr])
+		for _, d := range sw.Coverage.Dimensions() {
+			st := sw.Coverage.Status(d)
 			if !st.Complete() && st != "not_requested" {
 				t.Fatalf("%s %s = %s %v", s.Name, d, st, sw.Issues[d])
 			}

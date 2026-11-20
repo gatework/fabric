@@ -10,8 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gatework/go-netops/apply"
-	"github.com/gatework/go-netops/evidence"
+	"github.com/gatework/netops/apply"
+	"github.com/gatework/netops/change"
+	"github.com/gatework/netops/evidence"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/device"
@@ -43,7 +44,7 @@ func fleet(tb testing.TB) *workflow.Fleet {
 	r := in.Regions[0]
 	for _, name := range []string{"DC1-LEF01", "DC1-LEF02"} {
 		s, _ := r.Switch(name)
-		sw := nxos.Assemble(device.Identity{Name: s.Name, Mgmt: s.Mgmt.Addr, Region: r.Name, Role: s.Role},
+		sw := nxos.Assemble(tb.Context(), device.Identity{Name: s.Name, Mgmt: s.Mgmt.Addr, Region: r.Name, Role: s.Role},
 			map[string]string{"show running-config": cfgText})
 		f.Switches = append(f.Switches, sw)
 	}
@@ -98,13 +99,11 @@ func (f *fakeSwitch) Checkpoint(_ context.Context, name string) (*device.Config,
 func (f *fakeSwitch) Rollback(context.Context, string) (*device.Config, error) { return f.cfg, nil }
 func (f *fakeSwitch) Save(context.Context) error                               { return nil }
 
-func (f *fakeSwitch) Opener() apply.Opener[*device.Config] {
-	return func(ctx context.Context, run func(context.Context, apply.Session[*device.Config]) error) (error, error) {
-		return run(ctx, f), nil
-	}
+func (f *fakeSwitch) Apply(ctx context.Context, run func(context.Context, apply.Session[*device.Config]) error) (error, error) {
+	return run(ctx, f), nil
 }
 
-func (f *fakeSwitch) ReadConfiguration(context.Context) (*device.Config, error) {
+func (f *fakeSwitch) Read(context.Context) (*device.Config, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.current(), nil
@@ -112,9 +111,10 @@ func (f *fakeSwitch) ReadConfiguration(context.Context) (*device.Config, error) 
 
 var errLink = errors.New("link dropped")
 
-func (f *fakeSwitch) Write(_ context.Context, cmd string) error {
+func (f *fakeSwitch) Write(_ context.Context, c change.Command) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	cmd := c.Text
 	f.written = append(f.written, cmd)
 	if f.failAt > 0 && len(f.written) == f.failAt {
 		return errLink
@@ -124,26 +124,25 @@ func (f *fakeSwitch) Write(_ context.Context, cmd string) error {
 		if err != nil {
 			return err
 		}
-		after.Fingerprint = evidence.Digest([]byte(strings.Join(f.written, "\n")))
+		after.Fingerprint = string(evidence.DigestString(strings.Join(f.written, "\n")))
 		f.cfg, f.changed = after, true
 	}
 	return nil
 }
 
+// memJournal keeps every execution record in memory.
 type memJournal struct {
-	mu     sync.Mutex
-	states []apply.State
+	mu      sync.Mutex
+	records []apply.Record
 }
 
-func (j *memJournal) WriteExecution(_ context.Context, s apply.State) error {
+func (j *memJournal) Execution(string, string) apply.Journal { return j }
+
+func (j *memJournal) Write(_ context.Context, r apply.Record) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	j.states = append(j.states, s)
+	j.records = append(j.records, r)
 	return nil
-}
-
-func (j *memJournal) FinalizeExecution(ctx context.Context, s apply.State) error {
-	return j.WriteExecution(ctx, s)
 }
 
 func switches(tb testing.TB, b *workflow.Bundle) map[netip.Addr]*fakeSwitch {

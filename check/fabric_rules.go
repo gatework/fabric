@@ -7,9 +7,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/gatework/go-netops/assess"
-	"github.com/gatework/go-netops/drift"
-	"github.com/gatework/go-netops/evidence"
+	"github.com/gatework/netops/assess"
+	"github.com/gatework/netops/drift"
+	"github.com/gatework/netops/evidence"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/baseline"
@@ -43,7 +43,7 @@ const (
 type fabricEval func(f *Fabric, sub assess.Subject) []assess.Finding
 
 func fabricRule(id assess.RuleID, title string, sev assess.Severity, cat assess.Category, needs []evidence.Dimension, eval fabricEval) assess.Rule[*Fabric] {
-	return assess.NewRule(assess.RuleMeta{ID: id, Title: title, Severity: sev, Category: cat, Requires: needs, Verify: needs},
+	return assess.Check(assess.Meta{ID: id, Title: title, Severity: sev, Category: cat, Requires: needs, Verify: needs},
 		func(in assess.Input[*Fabric]) []assess.Finding {
 			return eval(in.Model, fabricSubject(in.Model))
 		})
@@ -83,21 +83,31 @@ func outliers[K comparable, V comparable](f *Fabric, sub func(K) assess.Subject,
 	for k, byMember := range values {
 		var members []drift.Member[V]
 		for _, who := range slices.Sorted(maps.Keys(byMember)) {
-			members = append(members, drift.Member[V]{Subject: assess.NewSubject("switch", who), Value: byMember[who], Present: true})
+			members = append(members, drift.Member[V]{ID: who, Value: byMember[who]})
 		}
-		want, ok, devs := drift.Consensus("value", members)
-		if len(devs) == 0 {
+		if len(members) < 2 {
 			continue
+		}
+		a := drift.Consensus(members, func(v V) string { return fmt.Sprintf("%#v", v) }, 0)
+		if len(a.Outliers) == 0 {
+			continue
+		}
+		want, ok := a.Value, true
+		devs := a.Outliers
+		if a.Tied || a.Count < 2 {
+			// No clear majority: every member is in question.
+			var zero V
+			want, ok, devs = zero, false, members
 		}
 		var who []string
 		for _, d := range devs {
-			who = append(who, d.Subject.Key)
+			who = append(who, d.ID)
 		}
 		var expected any
 		if ok {
 			expected = want
 		}
-		out = append(out, assess.Finding{Subject: sub(k), Detail: describe(k, want, who), Expected: expected, Actual: who})
+		out = append(out, assess.Finding{Subject: sub(k), Detail: describe(k, want, who), Expected: text(expected), Actual: text(who)})
 	}
 	slices.SortFunc(out, bySubject)
 	return out
@@ -328,7 +338,7 @@ func intentDrift(f *Fabric, sub assess.Subject) []assess.Finding {
 				Detail:      fmt.Sprintf("%s 需要 %s %s", sw.Name, op.Action(), op.Ref()),
 				Expected:    "intent",
 				Actual:      op.Action().String(),
-				Remediation: &assess.Remediation{Status: assess.RemediationCandidate, Change: op},
+				Remediation: &assess.Remediation{Summary: fmt.Sprintf("%s %s", op.Action(), op.Ref())},
 			})
 		}
 	}
@@ -344,18 +354,15 @@ func baselineDrift(f *Fabric, sub assess.Subject) []assess.Finding {
 		exp := f.Baseline.Resolve(f.Name, sw.Role)
 		for _, d := range checkBaseline(sub.Child("switch", sw.Name), exp, sw.Config) {
 			fd := d.Finding(fmt.Sprintf("%s %s：期望 %v，实际 %v", sw.Name, d.Path, orDash(d.Expected), orDash(d.Actual)))
-			fd.Remediation = &assess.Remediation{Status: assess.RemediationCandidate}
+			fd.Remediation = &assess.Remediation{Summary: "align " + d.Path + " with the baseline"}
 			out = append(out, fd)
 		}
 	}
 	return out
 }
 
-func orDash(v any) any {
-	if s, ok := v.(string); ok && s == "" {
-		return "-"
-	}
-	if v == nil {
+func orDash(v string) string {
+	if v == "" {
 		return "-"
 	}
 	return v

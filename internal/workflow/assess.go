@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/gatework/go-netops/assess"
+	"github.com/gatework/netops/assess"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/adopt"

@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/gatework/go-netops/change"
+	"github.com/gatework/netops/change"
 
 	"github.com/gatework/fabric/device"
 )
 
-// ChangeKind is the go-netops change kind of a changeset.
+// ChangeKind is the netops change kind of a changeset.
 const ChangeKind change.Kind = "fabric_changeset"
 
 // ErrEmpty reports a changeset without operations.
@@ -69,7 +69,7 @@ func (c *Changeset) Validate() error {
 
 // Render returns the commands and the rollback, which inverts every
 // operation in reverse order.
-func (c *Changeset) Render() (change.Script, error) {
+func (c *Changeset) Render(*device.Config) (change.Script, error) {
 	cmds, err := c.render.Render(c.ops)
 	if err != nil {
 		return change.Script{}, err
@@ -82,7 +82,7 @@ func (c *Changeset) Render() (change.Script, error) {
 	if err != nil {
 		return change.Script{}, err
 	}
-	return change.Script{Commands: cmds, Rollback: rollback}, nil
+	return change.Script{Commands: change.Commands(cmds...), Rollback: change.Commands(rollback...)}, nil
 }
 
 // Eligible requires every target object to still be in its planned
@@ -103,8 +103,12 @@ func (c *Changeset) Eligible(cfg *device.Config) error {
 	return errors.Join(errs...)
 }
 
-// Satisfied requires every target object to show its target state.
-func (c *Changeset) Satisfied(cfg *device.Config) error {
+// Satisfied reports whether every target object shows its target state.
+func (c *Changeset) Satisfied(cfg *device.Config) bool { return c.Unsatisfied(cfg) == nil }
+
+// Unsatisfied explains which target objects do not show their target
+// state, or returns nil.
+func (c *Changeset) Unsatisfied(cfg *device.Config) error {
 	var errs []error
 	for _, op := range c.ops {
 		if err := op.Holds(cfg); err != nil {
@@ -139,13 +143,10 @@ func (c *Changeset) MarshalJSON() ([]byte, error) {
 	}{wire})
 }
 
-// Decoder returns a go-netops change decoder that rebuilds changesets
+// Decoder returns the netops change decoder that rebuilds changesets
 // bound to r.
 func Decoder(r Renderer) change.Decoder[*device.Config] {
-	return func(kind change.Kind, body json.RawMessage) (change.Change[*device.Config], error) {
-		if kind != ChangeKind {
-			return nil, fmt.Errorf("plan: change kind %q is not executable", kind)
-		}
+	return change.Decoder[*device.Config]{Kind: ChangeKind, Decode: func(body []byte) (change.Change[*device.Config], error) {
 		var wire struct {
 			Ops []wireOp `json:"ops"`
 		}
@@ -160,8 +161,12 @@ func Decoder(r Renderer) change.Decoder[*device.Config] {
 			}
 			ops = append(ops, op)
 		}
-		return NewChangeset(ops, r)
-	}
+		cs, err := NewChangeset(ops, r)
+		if err != nil {
+			return nil, err
+		}
+		return cs, nil
+	}}
 }
 
 func decodeOp(w wireOp) (Op, error) {

@@ -7,13 +7,19 @@ import (
 	"os"
 	"time"
 
-	"github.com/gatework/go-netops/assess"
 	"github.com/gatework/net-connector/connector"
+	"github.com/gatework/net-connector/transport/ssh"
+	"github.com/gatework/net-connector/vendors"
+	"github.com/gatework/netops/assess"
+	"github.com/gatework/netops/credential"
+	ndevice "github.com/gatework/netops/device"
+	"github.com/gatework/netops/secret"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/adapter/netconnector"
 	"github.com/gatework/fabric/baseline"
 	"github.com/gatework/fabric/internal/workflow"
+	"github.com/gatework/fabric/vendors/nxos"
 )
 
 // ErrCredentials reports missing device credentials.
@@ -115,26 +121,47 @@ func CredentialsFromEnv(lookup func(string) (string, bool)) (Credentials, error)
 	return c, nil
 }
 
+// Switch is the netops identity of the NX-OS switch at addr.
+func Switch(addr netip.Addr) ndevice.Device {
+	return ndevice.Device{ID: addr.String(), Mgmt: addr, Platform: nxos.Platform}
+}
+
 // Dialer returns the deployment dialer.
-func (s SSH) Dialer(c Credentials) workflow.Dialer {
-	return func(addr netip.Addr) workflow.Switch { return netconnector.New(s.connection(addr, c)) }
+func (s SSH) Dialer(c Credentials) (workflow.Dialer, error) {
+	d, err := s.connector(c)
+	if err != nil {
+		return nil, err
+	}
+	return func(addr netip.Addr) workflow.Switch { return netconnector.New(d, Switch(addr)) }, nil
 }
 
 // Collector returns the collection dialer.
-func (s SSH) Collector(c Credentials) func(netip.Addr) workflow.Collector {
-	return func(addr netip.Addr) workflow.Collector { return netconnector.New(s.connection(addr, c)) }
+func (s SSH) Collector(c Credentials) (func(netip.Addr) workflow.Collector, error) {
+	d, err := s.connector(c)
+	if err != nil {
+		return nil, err
+	}
+	return func(addr netip.Addr) workflow.Collector { return netconnector.New(d, Switch(addr)) }, nil
 }
 
-func (s SSH) connection(addr netip.Addr, c Credentials) connector.ConnectionConfig {
-	return connector.ConnectionConfig{
-		Host:           addr.String(),
-		Username:       c.Username,
-		Password:       c.Password,
-		EnablePassword: c.Enable,
-		Port:           s.Port,
-		KnownHosts:     s.KnownHosts,
-		HostKeyPolicy:  connector.HostKeyPolicy(s.HostKeyPolicy),
-		LoginTimeout:   s.LoginTimeout,
-		CommandTimeout: s.CommandTimeout,
+// connector assembles the net-connector dialer: SSH with the host key
+// policy, the built-in NX-OS driver and the environment credentials.
+func (s SSH) connector(c Credentials) (*connector.Dialer, error) {
+	sd, err := ssh.New(ssh.Options{KnownHosts: s.KnownHosts, HostKeys: ssh.Policy(s.HostKeyPolicy), Timeout: s.LoginTimeout})
+	if err != nil {
+		return nil, fmt.Errorf("bootstrap: ssh: %w", err)
 	}
+	d, err := connector.NewDialer(connector.Options{
+		Registry: vendors.Builtin(),
+		Credentials: credential.Static{
+			Username: c.Username, Password: secret.New(c.Password), EnablePassword: secret.New(c.Enable),
+		},
+		Transport: sd,
+		Port:      s.Port,
+		Timeout:   s.CommandTimeout,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("bootstrap: %w", err)
+	}
+	return d, nil
 }

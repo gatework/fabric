@@ -7,8 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gatework/go-netops/session"
-	"github.com/gatework/go-netops/store"
+	"github.com/gatework/netops/store"
 
 	"github.com/gatework/fabric/adapter/snapshot"
 	"github.com/gatework/fabric/vendors/nxos"
@@ -57,7 +56,7 @@ func Collect(ctx context.Context, req CollectRequest) []CollectResult {
 			select {
 			case sem <- struct{}{}:
 			case <-ctx.Done():
-				out[i] = CollectResult{Mgmt: addr.String(), Error: session.Code(ctx.Err())}
+				out[i] = CollectResult{Mgmt: addr.String(), Error: code(ctx.Err())}
 				return
 			}
 			defer func() { <-sem }()
@@ -72,7 +71,7 @@ func collectOne(ctx context.Context, req CollectRequest, addr netip.Addr) Collec
 	res := CollectResult{Mgmt: addr.String()}
 	outs, err := req.Dial(addr).Collect(ctx)
 	if err != nil {
-		res.Error = session.Code(err)
+		res.Error = code(err)
 	}
 	commands := make([]string, 0, len(nxos.Probes()))
 	for _, p := range nxos.Probes() {
@@ -84,8 +83,8 @@ func collectOne(ctx context.Context, req CollectRequest, addr netip.Addr) Collec
 		return res
 	}
 	for rel, body := range files {
-		if err := req.Store.Publish(ctx, rel, body); err != nil {
-			res.Error = session.Code(err)
+		if _, err := req.Store.Write(ctx, rel, body); err != nil {
+			res.Error = code(err)
 			return res
 		}
 	}

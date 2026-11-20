@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/gatework/go-netops/textscan"
+	"github.com/gatework/netops/parse"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/device"
@@ -13,7 +13,7 @@ import (
 func parseNVEPeers(st *device.State, text string) *result {
 	r := &result{empty: blank(text)}
 	st.NVEPeers = []device.NVEPeer{}
-	for line := range textscan.Lines(text) {
+	for line := range parse.Lines(text) {
 		t := strings.TrimSpace(line.Text)
 		f := strings.Fields(t)
 		switch {
@@ -33,7 +33,7 @@ func parseNVEPeers(st *device.State, text string) *result {
 			}
 			st.NVEPeers = append(st.NVEPeers, p)
 		default:
-			r.scan.Unparsed(line.Number)
+			r.scan.Issue(parse.IssueUnparsed, line.Number)
 		}
 	}
 	// Spines with NVE enabled but no peers print only the header.
@@ -46,7 +46,7 @@ func parseNVEVNIs(st *device.State, text string) *result {
 	r := &result{empty: blank(text)}
 	st.NVEVNIs = []device.NVEVNI{}
 	legend := true
-	for line := range textscan.Lines(text) {
+	for line := range parse.Lines(text) {
 		t := strings.TrimSpace(line.Text)
 		switch {
 		case t == "" || dashes(t):
@@ -57,12 +57,12 @@ func parseNVEVNIs(st *device.State, text string) *result {
 		case r.header:
 			m := nveVNIRow.FindStringSubmatch(t)
 			if m == nil {
-				r.scan.Unparsed(line.Number)
+				r.scan.Issue(parse.IssueUnparsed, line.Number)
 				continue
 			}
 			vni, err := fabric.ParseVNI(m[2])
 			if err != nil {
-				r.scan.Unparsed(line.Number)
+				r.scan.Issue(parse.IssueUnparsed, line.Number)
 				continue
 			}
 			st.NVEVNIs = append(st.NVEVNIs, device.NVEVNI{
@@ -70,7 +70,7 @@ func parseNVEVNIs(st *device.State, text string) *result {
 				Mode: m[5], Layer: m[6], Domain: m[7], Flags: m[8],
 			})
 		default:
-			r.scan.Unparsed(line.Number)
+			r.scan.Issue(parse.IssueUnparsed, line.Number)
 		}
 	}
 	return r
@@ -85,7 +85,7 @@ func parseBGPSummary(st *device.State, text string) *result {
 	r := &result{empty: blank(text)}
 	st.BGP = device.BGPSummary{Neighbors: []device.BGPNeighbor{}}
 	table := ""
-	for line := range textscan.Lines(text) {
+	for line := range parse.Lines(text) {
 		t := strings.TrimSpace(line.Text)
 		f := strings.Fields(t)
 		switch {
@@ -109,7 +109,7 @@ func parseBGPSummary(st *device.State, text string) *result {
 		case table == "types":
 			// The per-route-type breakdown repeats the prefix count.
 		default:
-			r.scan.Unparsed(line.Number)
+			r.scan.Issue(parse.IssueUnparsed, line.Number)
 		}
 	}
 	// Dynamic (prefix) neighbors make "config peers" exceed the listed
@@ -156,7 +156,7 @@ func parseOSPF(st *device.State, text string) *result {
 	r := &result{empty: blank(text)}
 	st.OSPF = []device.OSPFNeighbor{}
 	process, vrf := "", ""
-	for line := range textscan.Lines(text) {
+	for line := range parse.Lines(text) {
 		t := strings.TrimSpace(line.Text)
 		switch {
 		case t == "":
@@ -173,7 +173,7 @@ func parseOSPF(st *device.State, text string) *result {
 				Full: strings.HasPrefix(m[3], "FULL"), Address: m[5], Interface: name,
 			})
 		default:
-			r.scan.Unparsed(line.Number)
+			r.scan.Issue(parse.IssueUnparsed, line.Number)
 		}
 	}
 	return r

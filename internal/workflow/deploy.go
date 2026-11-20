@@ -9,10 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gatework/go-netops/apply"
-	"github.com/gatework/go-netops/change"
-	"github.com/gatework/go-netops/evidence"
-	"github.com/gatework/go-netops/session"
+	"github.com/gatework/netops/apply"
+	"github.com/gatework/netops/failure"
 
 	"github.com/gatework/fabric/device"
 	"github.com/gatework/fabric/governance"
@@ -32,8 +30,15 @@ type Switch interface {
 	Rollback(ctx context.Context, name string) (*device.Config, error)
 	// Save copies the running configuration to startup.
 	Save(ctx context.Context) error
-	// Opener lends a session to go-netops apply.
-	Opener() apply.Opener[*device.Config]
+	// Apply lends one session to netops apply and reports the operation
+	// and close errors separately.
+	Apply(ctx context.Context, run func(context.Context, apply.Session[*device.Config]) error) (opErr, closeErr error)
+}
+
+// Executions persists the execution record of a plan on a switch. The
+// netops store/journal.Journal implements it.
+type Executions interface {
+	Execution(planID, deviceID string) apply.Journal
 }
 
 // Dialer returns the device behind a management address.
@@ -66,7 +71,7 @@ type SwitchResult struct {
 	Lost       []string        `json:"lost,omitempty"`
 	Saved      bool            `json:"saved,omitempty"`
 	Detail     string          `json:"detail,omitempty"`
-	State      *apply.State    `json:"state,omitempty"`
+	Record     *apply.Record   `json:"state,omitempty"`
 }
 
 // DeployReport is the record of a deployment.
@@ -99,7 +104,7 @@ func (r DeployReport) OK() bool {
 type DeployRequest struct {
 	Bundle  *Bundle
 	Dial    Dialer
-	Journal apply.Journal
+	Journal Executions
 	Save    bool
 	// Gate holds the operator's declarations for the change gate.
 	Gate   governance.GateOptions
@@ -181,7 +186,7 @@ func health(ctx context.Context, sw Switch) (rollout.Health, error) {
 	if err != nil {
 		return rollout.Health{}, err
 	}
-	s := nxos.Assemble(device.Identity{}, outs)
+	s := nxos.Assemble(ctx, device.Identity{}, outs)
 	return rollout.HealthOf(s.State), nil
 }
 
@@ -201,30 +206,30 @@ func deploySwitch(ctx context.Context, req DeployRequest, it *Item) (res SwitchR
 	sw := req.Dial(addr)
 	before, err := health(ctx, sw)
 	if err != nil {
-		res.Outcome, res.Detail = OutcomeFailed, "pre-change health: "+session.Code(err)
+		res.Outcome, res.Detail = OutcomeFailed, "pre-change health: "+code(err)
 		return res
 	}
 	res.Before = &before
 	name := CheckpointName(req.Bundle.ID, req.Now())
 	cfg, err := sw.Checkpoint(ctx, name)
 	if err != nil {
-		res.Outcome, res.Detail = OutcomeFailed, "checkpoint: "+session.Code(err)
+		res.Outcome, res.Detail = OutcomeFailed, "checkpoint: "+code(err)
 		return res
 	}
 	res.Checkpoint = name
-	if err := it.Plan.CheckBefore(cfg, cfg.Fingerprint); err != nil {
+	if _, err := it.Plan.Precheck(cfg); err != nil {
 		res.Outcome, res.Detail = OutcomeDrifted, err.Error()
 		return res
 	}
-	state, outcome := execute(ctx, req, it, sw)
-	res.State, res.Outcome = &state, outcome
+	rec, outcome := execute(ctx, req, it, sw)
+	res.Record, res.Outcome = &rec, outcome
 	if outcome != OutcomeVerified {
-		res.Detail = state.Error
+		res.Detail = string(rec.Failure)
 		return res
 	}
 	after, err := health(ctx, sw)
 	if err != nil {
-		res.Outcome, res.Detail = OutcomeDegraded, "post-change health: "+session.Code(err)
+		res.Outcome, res.Detail = OutcomeDegraded, "post-change health: "+code(err)
 		return res
 	}
 	res.After = &after
@@ -234,7 +239,7 @@ func deploySwitch(ctx context.Context, req DeployRequest, it *Item) (res SwitchR
 	}
 	if req.Save {
 		if err := sw.Save(ctx); err != nil {
-			res.Detail = "save: " + session.Code(err)
+			res.Detail = "save: " + code(err)
 			return res
 		}
 		res.Saved = true
@@ -242,59 +247,34 @@ func deploySwitch(ctx context.Context, req DeployRequest, it *Item) (res SwitchR
 	return res
 }
 
-func execute(ctx context.Context, req DeployRequest, it *Item, sw Switch) (apply.State, Outcome) {
-	env, err := it.Plan.Envelope()
-	if err != nil {
-		return apply.State{Error: err.Error()}, OutcomeFailed
-	}
-	body, err := it.Plan.MarshalJSON()
-	if err != nil {
-		return apply.State{Error: err.Error()}, OutcomeFailed
-	}
-	result, err := apply.Run(ctx, apply.Request[*device.Config]{
-		Plan: planAdapter{it.Plan},
-		Identity: apply.State{
-			Device:               apply.Device{Host: env.Target.Host, Name: env.Target.Name, Platform: env.Target.Platform},
-			PlanSHA256:           evidence.Digest(body),
-			PlanItem:             req.Bundle.ID,
-			ExpectedConfigSHA256: env.ExpectedFingerprint,
-		},
-		Open:     sw.Opener(),
-		Journal:  req.Journal,
-		Classify: session.Codes,
+// execute runs the plan through netops apply in one session: precheck,
+// journaled writes and readback verification. A failed logout after a
+// verified change leaves the outcome uncertain (apply.Settle).
+func execute(ctx context.Context, req DeployRequest, it *Item, sw Switch) (apply.Record, Outcome) {
+	var rec apply.Record
+	opErr, closeErr := sw.Apply(ctx, func(ctx context.Context, s apply.Session[*device.Config]) error {
+		var err error
+		rec, err = apply.Run(ctx, apply.Request[*device.Config]{
+			Plan:    it.Plan,
+			Session: s,
+			Journal: req.Journal.Execution(it.Plan.Meta().ID, it.Plan.Target().ID),
+			Now:     req.Now,
+		})
+		return err
 	})
-	state := result.State
-	if err != nil && state.Error == "" {
-		state.Error = session.Code(err)
+	if rec.Status == "" {
+		// The session never opened: nothing was journaled or sent.
+		rec.Status, rec.Failure = apply.StatusFailed, failure.Primary(opErr)
 	}
-	switch state.Status {
-	case apply.StatusVerified:
-		return state, OutcomeVerified
-	case apply.StatusUncertain:
-		return state, OutcomeUncertain
-	case apply.StatusFailed, apply.StatusConfirmed, apply.StatusExecuting:
-		return state, OutcomeFailed
+	rec, _ = apply.Settle(rec, closeErr)
+	switch {
+	case rec.Status.Success():
+		return rec, OutcomeVerified
+	case rec.Status == apply.StatusUncertain:
+		return rec, OutcomeUncertain
 	default:
-		return state, OutcomeFailed
+		return rec, OutcomeFailed
 	}
-}
-
-// planAdapter presents a go-netops change plan to apply.Run.
-type planAdapter struct {
-	p *change.Plan[*device.Config]
-}
-
-func (a planAdapter) Commands() []string { return a.p.Commands() }
-
-func (a planAdapter) CheckBefore(before *device.Config) error {
-	return a.p.CheckBefore(before, before.Fingerprint)
-}
-
-func (a planAdapter) CheckAfter(before, after *device.Config) (string, error) {
-	if err := a.p.Verify(before, after); err != nil {
-		return after.Fingerprint, err
-	}
-	return after.Fingerprint, nil
 }
 
 // ErrRollback reports a rollback whose result could not be confirmed.
@@ -331,3 +311,6 @@ func Rollback(ctx context.Context, sw Switch, checkpoint string) (RollbackResult
 	res.Lost, res.Recovered = rollout.Gate(before, after), rollout.Gate(after, before)
 	return res, nil
 }
+
+// code is the stable failure code of err for reports.
+func code(err error) string { return string(failure.Primary(err)) }

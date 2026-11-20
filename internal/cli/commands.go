@@ -11,8 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/gatework/go-netops/evidence"
-	"github.com/gatework/go-netops/store"
+	"github.com/gatework/netops/evidence"
+	"github.com/gatework/netops/store"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/adapter/snapshot"
@@ -46,7 +46,7 @@ func newParse(e env) *cobra.Command {
 			}
 			text := snapshot.Clean(string(body), show, "")
 			if show == "" {
-				cfg, err := nxos.ParseConfig(text)
+				cfg, err := nxos.ParseConfig(cmd.Context(), text)
 				if err != nil {
 					return err
 				}
@@ -55,7 +55,7 @@ func newParse(e env) *cobra.Command {
 			for _, p := range nxos.Probes() {
 				if p.Command == show {
 					sw := &device.Switch{}
-					nxos.Observe(sw, p.Dimension, text)
+					nxos.Observe(cmd.Context(), sw, p.Dimension, text)
 					return writeJSON(e, sw)
 				}
 			}
@@ -93,12 +93,16 @@ func newCollect(e env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			st, err := store.New(output, store.Options{})
+			dial, err := ssh.Collector(creds)
+			if err != nil {
+				return err
+			}
+			st, err := store.NewBatch(output, time.Now())
 			if err != nil {
 				return err
 			}
 			results := workflow.Collect(cmd.Context(), workflow.CollectRequest{
-				Targets: targets, Dial: ssh.Collector(creds), Store: st, Parallel: parallel,
+				Targets: targets, Dial: dial, Store: st, Parallel: parallel,
 			})
 			failed := 0
 			for _, r := range results {
@@ -107,7 +111,7 @@ func newCollect(e env) *cobra.Command {
 					_, _ = fmt.Fprintf(e.stdout, "  %s 失败：%s（已保存 %d 条命令）\n", r.Mgmt, r.Error, r.Commands)
 				}
 			}
-			_, _ = fmt.Fprintf(e.stdout, "采集完成：%d 台成功，%d 台失败，快照目录 %s\n", len(results)-failed, failed, st.Directory())
+			_, _ = fmt.Fprintf(e.stdout, "采集完成：%d 台成功，%d 台失败，快照目录 %s\n", len(results)-failed, failed, st.Root())
 			if failed > 0 {
 				return exit(ExitIncomplete, "")
 			}
@@ -335,14 +339,14 @@ func newPlan(e env) *cobra.Command {
 			if len(b.Items) == 0 {
 				return nil
 			}
-			st, err := store.New(output, store.Options{})
+			st, err := store.NewBatch(output, time.Now())
 			if err != nil {
 				return err
 			}
 			if err := workflow.WriteBundle(cmd.Context(), st, b); err != nil {
 				return err
 			}
-			_, _ = fmt.Fprintf(e.stdout, "\n计划 %s 已写入 %s\n下发：fabric deploy --plan %s --apply --confirm %s\n", b.ID, st.Directory(), st.Directory(), b.ID)
+			_, _ = fmt.Fprintf(e.stdout, "\n计划 %s 已写入 %s\n下发：fabric deploy --plan %s --apply --confirm %s\n", b.ID, st.Root(), st.Root(), b.ID)
 			return nil
 		},
 	}

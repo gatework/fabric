@@ -1,12 +1,16 @@
 package nxos_test
 
 import (
+	"encoding/json"
+	"net/netip"
 	"os"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/gatework/go-netops/change"
+	"github.com/gatework/netops/change"
+	ndevice "github.com/gatework/netops/device"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/device"
@@ -36,7 +40,7 @@ func TestRenderParsesBack(t *testing.T) {
 	sw, _ := r.Switch("DC1-LEF01")
 	base := "interface Ethernet1/3\n  no shutdown\ninterface Ethernet1/20\ninterface Ethernet1/49\ninterface port-channel10\n  switchport\n  switchport mode trunk\n  switchport trunk allowed vlan 1\n" +
 		"interface nve1\n  host-reachability protocol bgp\nrouter bgp 65001\n"
-	cfg, err := nxos.ParseConfig(base)
+	cfg, err := nxos.ParseConfig(t.Context(), base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +53,7 @@ func TestRenderParsesBack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	back, err := nxos.ParseConfig(base + text)
+	back, err := nxos.ParseConfig(t.Context(), base+text)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,43 +99,46 @@ func TestChangesetPlanRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, err := change.NewPlan(change.Target{Host: "198.51.100.11", Name: sw.Name, Platform: nxos.Platform}, cfg.Fingerprint, change.Change[*device.Config](cs))
+	target := ndevice.Device{ID: sw.Name, Name: sw.Name, Mgmt: netip.MustParseAddr("198.51.100.11"), Platform: nxos.Platform}
+	p, err := plan.NewPlan(change.Meta{ID: "b1-" + sw.Name, Created: time.Unix(0, 0).UTC()}, target, cfg, cs)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmds := p.Commands()
+	cmds := texts(p.Commands())
 	if cmds[0] != "configure terminal" || cmds[len(cmds)-1] != "end" {
 		t.Errorf("commands not wrapped: %v", cmds)
 	}
-	rb := strings.Join(p.Rollback(), "\n")
+	rb := strings.Join(texts(p.Script().Rollback), "\n")
 	for _, want := range []string{"no interface Vlan300", "no vlan 300", "switchport trunk allowed vlan remove 300"} {
 		if !strings.Contains(rb, want) {
 			t.Errorf("rollback lacks %q:\n%s", want, rb)
 		}
 	}
-	body, err := p.MarshalJSON()
+	e, err := p.Envelope()
 	if err != nil {
 		t.Fatal(err)
 	}
-	back, err := change.DecodePlan(body, plan.Decoder(nxos.Renderer{}))
+	body, _ := json.Marshal(e)
+	codec, _ := plan.Codec(nxos.Renderer{})
+	back, err := codec.Decode(body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(back.Commands(), cmds) {
+	if !slices.Equal(texts(back.Commands()), cmds) {
 		t.Error("decoded plan renders differently")
 	}
-	if err := back.CheckBefore(cfg, cfg.Fingerprint); err != nil {
-		t.Errorf("check before: %v", err)
+	if r, err := back.Precheck(cfg); err != nil || r != change.Ready {
+		t.Errorf("precheck: %v %v", r, err)
 	}
 	after, err := plan.Simulate(cfg, ops)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := back.Verify(cfg, after); err != nil {
+	if _, err := back.Verify(cfg, after); err != nil {
 		t.Errorf("verify: %v", err)
 	}
 	tampered := strings.Replace(string(body), "vlan 300", "vlan 301", 1)
-	if _, err := change.DecodePlan([]byte(tampered), plan.Decoder(nxos.Renderer{})); err == nil {
+	if _, err := codec.Decode([]byte(tampered)); err == nil {
 		t.Error("tampered plan accepted")
 	}
 }
@@ -171,4 +178,12 @@ no feature pim
 	if _, err := nxos.RenderConfig([]plan.Op{plan.SettingOp{Setting: device.SettingVPCPeerGateway, Want: device.Enabled}}); err == nil {
 		t.Error("vpc setting without scope rendered")
 	}
+}
+
+func texts(cs []change.Command) []string {
+	out := make([]string, len(cs))
+	for i, c := range cs {
+		out[i] = c.Text
+	}
+	return out
 }
