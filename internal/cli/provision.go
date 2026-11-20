@@ -9,8 +9,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/gatework/netops/evidence"
+	"github.com/gatework/netops/set"
 	"github.com/gatework/netops/store"
-	"github.com/gatework/set"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/device"

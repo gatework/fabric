@@ -5,7 +5,7 @@ import (
 	"net/netip"
 	"slices"
 
-	"github.com/gatework/set"
+	"github.com/gatework/netops/set"
 )
 
 // Underlay is the routed fabric beneath the overlay: OSPF between

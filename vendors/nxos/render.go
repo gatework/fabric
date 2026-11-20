@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gatework/set"
+	"github.com/gatework/netops/set"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/device"
