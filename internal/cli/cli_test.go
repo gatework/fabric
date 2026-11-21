@@ -26,6 +26,29 @@ func TestHelpIsChinese(t *testing.T) {
 	}
 }
 
+func TestHelpWithInvalidConfig(t *testing.T) {
+	t.Parallel()
+	config := filepath.Join(t.TempDir(), "fabric.yml")
+	if err := os.WriteFile(config, []byte("unknown_field: snapshot\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	e := testEnv(&out, &errb)
+	e.environ = map[string]string{"FABRIC_CONFIG": config}
+	for _, args := range [][]string{{"--help"}, {"backup", "--help"}, {"help", "backup"}} {
+		out.Reset()
+		errb.Reset()
+		if code := run(t.Context(), args, e); code != ExitOK || !strings.Contains(out.String(), "Usage:") || errb.Len() != 0 {
+			t.Errorf("%v: code %d, stdout %q, stderr %q", args, code, out.String(), errb.String())
+		}
+	}
+	out.Reset()
+	errb.Reset()
+	if code := run(t.Context(), []string{"backup"}, e); code != ExitError || !strings.Contains(errb.String(), "field unknown_field not found") {
+		t.Fatalf("backup: code %d, stderr %q", code, errb.String())
+	}
+}
+
 func TestParseCommand(t *testing.T) {
 	t.Parallel()
 	var out, errb bytes.Buffer

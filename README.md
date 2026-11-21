@@ -59,6 +59,10 @@ fabric deploy  --plan plans/<计划目录>                          # 预览
 fabric deploy  --plan plans/<计划目录> --apply --confirm <计划ID>
 ```
 
+常用文件写进 `~/.gatework/fabric.yml` 后可省略对应参数：`intent`、`baseline`、`policy`、`snapshot`、`known_hosts` 是同名参数的默认值，采集快照、计划与执行记录默认写到 `~/.local/share/gatework/fabric/{snapshots,plans,executions}`；凭据放在同目录的 `.env`（0600）。配置按 `$FABRIC_CONFIG` → `./fabric.yml` → `~/.gatework/fabric.yml` 查找，示例见 [examples/fabric.yml](examples/fabric.yml)。
+
+将备份快照目录配置为 `backup_snapshot` 后，运行 `fabric backup` 即可检查备份；`--json`、`--region` 等选项与 `fabric check` 相同。
+
 意图示例见 [testdata/intent.yaml](testdata/intent.yaml)，整体设计见 [docs/design.md](docs/design.md)，术语见 [GLOSSARY.md](GLOSSARY.md)。
 
 ## 退出码

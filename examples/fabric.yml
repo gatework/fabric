@@ -1,0 +1,18 @@
+# fabric.yml — put it at ~/.gatework/fabric.yml (or ./fabric.yml, or name it
+# with $FABRIC_CONFIG). Every entry is the default of the flag of the same
+# name; a flag on the command line still wins. Relative paths resolve
+# against this file, "~" against the home directory.
+# Credentials (NC_DEVICE_USERNAME / NC_DEVICE_PASSWORD) go in the 0600 .env
+# next to this file, ~/.gatework/.env by default, or the environment.
+
+intent: fabric/intent.yaml          # --intent   (fabric import -o writes a draft)
+baseline: fabric/baseline.yaml      # --baseline (fabric baseline derive -o writes a draft)
+# policy: fabric/policy.yaml        # --policy   rule enable/disable, severity, parameters
+snapshot: ~/Documents/Snapshots/vxlan   # --snapshot the snapshot directory commands read
+# backup_snapshot: ~/.local/share/gatework/fabric/snapshots/backup   # fabric backup
+# known_hosts: ~/.ssh/known_hosts   # --known-hosts
+
+# Output roots; the defaults are under ~/.local/share/gatework/fabric/.
+# snapshots: ~/.local/share/gatework/fabric/snapshots    # collect --output
+# plans: ~/.local/share/gatework/fabric/plans            # plan --output
+# journal: ~/.local/share/gatework/fabric/executions     # deploy --journal
