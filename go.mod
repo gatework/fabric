@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/gatework/net-connector v0.10.0
-	github.com/gatework/netops v0.2.0
+	github.com/gatework/netops v0.3.0
 	github.com/google/go-cmp v0.7.0
 	github.com/spf13/cobra v1.10.2
 	go.yaml.in/yaml/v3 v3.0.6
