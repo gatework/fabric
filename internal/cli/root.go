@@ -8,6 +8,10 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
+
+	nbootstrap "github.com/gatework/netops/bootstrap"
+
+	"github.com/gatework/fabric/internal/bootstrap"
 )
 
 // Exit codes.
@@ -38,17 +42,42 @@ type env struct {
 	stderr io.Writer
 	lookup func(string) (string, bool)
 	tty    bool
+	// environ and home locate fabric.yml and the data directory; empty in
+	// tests, where flags carry everything.
+	environ map[string]string
+	home    string
 }
 
 // Run executes the command line and returns the process exit code.
 func Run(ctx context.Context, args []string) int {
 	info, err := os.Stdin.Stat()
 	tty := err == nil && info.Mode()&os.ModeCharDevice != 0
-	return run(ctx, args, env{stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr, lookup: os.LookupEnv, tty: tty})
+	home, _ := os.UserHomeDir()
+	return run(ctx, args, env{stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr, lookup: os.LookupEnv, tty: tty,
+		environ: nbootstrap.Environ(os.Environ()), home: home})
 }
 
 func run(ctx context.Context, args []string, e env) int {
-	root := newRoot(e) //nolint:contextcheck // cobra passes ctx to every command through cmd.Context().
+	lookup := e.lookup
+	e.lookup = func(name string) (string, bool) {
+		return lookup(name)
+	}
+	root := newRoot(e) //nolint:contextcheck // Cobra passes ctx to every command through cmd.Context().
+	// Cobra handles --help before pre-run hooks and validates required flags after them.
+	root.PersistentPreRunE = func(cmd *cobra.Command, _ []string) error {
+		if cmd.Parent() == root && cmd.Name() == "help" {
+			return nil
+		}
+		cfg, err := bootstrap.LoadConfig(ctx, e.environ, e.home)
+		if err != nil {
+			return err
+		}
+		if cfg.Path != "" || e.home != "" {
+			lookup = cfg.Lookup
+		}
+		applyDefaults(root, cfg)
+		return nil
+	}
 	root.SetArgs(args)
 	root.SetOut(e.stdout)
 	root.SetErr(e.stderr)
@@ -79,7 +108,7 @@ func newRoot(e env) *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.AddCommand(
-		newParse(e), newCollect(e), newCheck(e), newBaseline(e),
+		newParse(e), newCollect(e), newCheck(e), newBackup(e), newBaseline(e),
 		newImport(e), newPlan(e), newDeploy(e), newRollback(e),
 		newNetwork(e), newTenant(e), newSwitch(e), newPort(e),
 		newStatus(e), newLocate(e), newTopology(e), newCapacity(e), newReport(e),

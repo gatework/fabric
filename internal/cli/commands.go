@@ -85,6 +85,11 @@ func newCollect(e env) *cobra.Command {
 		Use:   "collect",
 		Short: "采集交换机运行配置与运行状态到快照目录",
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if len(hosts) > 0 && !cmd.Flags().Changed("intent") {
+				// A configured intent names the default targets; explicit
+				// hosts replace them instead of adding to them.
+				intentPath = ""
+			}
 			targets, err := collectTargets(intentPath, hosts)
 			if err != nil {
 				return err
@@ -230,6 +235,14 @@ func newCheck(e env) *cobra.Command {
 	c.Flags().StringVar(&region, "region", "", "只检查一个区域")
 	c.Flags().BoolVarP(&verbose, "verbose", "v", false, "列出全部发现")
 	c.Flags().BoolVar(&asJSON, "json", false, "输出 JSON")
+	return c
+}
+
+func newBackup(e env) *cobra.Command {
+	c := newCheck(e)
+	c.Use = "backup"
+	c.Short = "检查备份配置，默认读取 fabric.yml 的 backup_snapshot"
+	c.Args = cobra.NoArgs
 	return c
 }
 

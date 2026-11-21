@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## [0.3.0] - 2026-11-20
+
+### Added
+
+- `fabric.yml` 可配置意图、基线、策略、快照及输出目录。凭据可保存在同目录、权限为 0600 的 `.env`。
+- `fabric backup` 读取 `backup_snapshot` 指定的备份快照，可直接按区域检查或输出 JSON。
+
+### Changed
+
+- 采集、规划和执行记录默认写入 `~/.local/share/gatework/fabric/` 下的 `snapshots`、`plans` 和 `executions`。
+- 配置了默认意图时，`collect --host` 只采集显式指定的主机。同时显式传入 `--intent` 可将意图中的交换机加入目标。
+
+### Fixed
+
+- `--help` 和 `help` 在配置无效或缺失时仍可显示帮助。
+
 ## [0.2.1] - 2026-11-20
 
 - 将共享运维内核 netops 更新到 v0.3.0。
