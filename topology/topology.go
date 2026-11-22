@@ -59,6 +59,14 @@ type LinkCheck struct {
 	Detail string         `json:"detail,omitempty"`
 	// Mismatch lists attributes the two ends configure differently.
 	Mismatch []string `json:"mismatch,omitempty"`
+	// Ends are both ends as configured and reported: layer, address,
+	// port state, speed and MTU.
+	Ends [2]End `json:"ends"`
+	// Layers verifies the link bottom up: port state, CDP, configuration
+	// and OSPF adjacency.
+	Layers []Probe `json:"layers"`
+	// Diagnosis is set for a link that needs attention.
+	Diagnosis *Diagnosis `json:"diagnosis,omitempty"`
 }
 
 // Audit is one region's cabling verdict.
@@ -71,6 +79,47 @@ type Audit struct {
 	Spines   []string `json:"spines"`
 	// Cells holds, per "vtep|spine", the worst state of their links.
 	Cells map[string]State `json:"cells"`
+	// Uplinks is every VTEP's redundancy towards the spines, and
+	// SpineLoads every spine's downlinks.
+	Uplinks    []Uplinks   `json:"uplinks"`
+	SpineLoads []SpineLoad `json:"spine_loads"`
+	// Unobserved lists intent switches the snapshot has no evidence for.
+	Unobserved []string `json:"unobserved,omitempty"`
+}
+
+// Faults returns the links that need attention, lowest layer first.
+func (a *Audit) Faults() []LinkCheck {
+	var out []LinkCheck
+	for _, c := range a.Links {
+		if c.Diagnosis != nil {
+			out = append(out, c)
+		}
+	}
+	slices.SortStableFunc(out, func(x, y LinkCheck) int { return cmp.Compare(x.Diagnosis.Fault, y.Diagnosis.Fault) })
+	return out
+}
+
+// Asymmetric returns the VTEPs whose healthy uplinks differ in speed.
+func (a *Audit) Asymmetric() []Uplinks {
+	var out []Uplinks
+	for _, u := range a.Uplinks {
+		if u.Asymmetric() {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+// AtRisk returns the VTEPs that lost redundancy, worst first.
+func (a *Audit) AtRisk() []Uplinks {
+	var out []Uplinks
+	for _, u := range a.Uplinks {
+		if u.Redundancy.AtRisk() {
+			out = append(out, u)
+		}
+	}
+	slices.SortStableFunc(out, func(x, y Uplinks) int { return cmp.Compare(y.Redundancy, x.Redundancy) })
+	return out
 }
 
 // NeighborName reduces a CDP device ID ("LEF01.example.net(FDO123)") to
@@ -92,8 +141,11 @@ func Run(r *fabric.Region, switches []*device.Switch) Audit {
 	a := Audit{Region: r.Name, Cells: map[string]State{}}
 	byName := map[string]*device.Switch{}
 	cdp := map[portKey]Adjacency{}
+	ev := &evidenceSet{byName: byName, ports: ports{}, ospf: adjacencies{}}
 	for _, sw := range switches {
 		byName[sw.Name] = sw
+		indexPorts(sw, ev.ports)
+		indexOSPF(sw, ev.ospf)
 		if !sw.Has(device.DimCDP) {
 			continue
 		}
@@ -112,7 +164,16 @@ func Run(r *fabric.Region, switches []*device.Switch) Audit {
 	if r.Underlay != nil {
 		a.Links = append(a.Links, undeclared(r, cdp, declared)...)
 	}
+	for i := range a.Links {
+		ev.probe(&a.Links[i])
+	}
 	a.matrix(r)
+	a.redundancy(r, ev)
+	for _, s := range r.Switches {
+		if _, ok := byName[s.Name]; !ok {
+			a.Unobserved = append(a.Unobserved, s.Name)
+		}
+	}
 	return a
 }
 

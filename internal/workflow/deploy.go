@@ -351,7 +351,7 @@ func ItemDevice(it *Item) ndevice.Device {
 	addr, _ := netip.ParseAddr(it.Mgmt)
 	return ndevice.Device{
 		ID: it.Member.Name, Name: it.Member.Name, Mgmt: addr, Platform: nxos.Platform,
-		Role: string(it.Member.Role), Site: it.Member.Region,
+		Role: it.Member.Role.String(), Site: it.Member.Region,
 	}
 }
 

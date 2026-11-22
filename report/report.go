@@ -14,8 +14,8 @@ import (
 	"github.com/gatework/fabric/check"
 )
 
-// severityName is the Chinese label of a severity.
-func severityName(s assess.Severity) string {
+// SeverityName returns the Chinese label of a severity.
+func SeverityName(s assess.Severity) string {
 	switch s {
 	case assess.SeverityCritical:
 		return "严重"
@@ -72,7 +72,7 @@ func Check(w io.Writer, rep check.Report, opt CheckOptions) error {
 	p.line("检查结果：%d 条发现，%d 条规则命中", len(rep.Findings()), len(list))
 	for _, g := range list {
 		p.line("")
-		p.line("[%s] %s（%s）%d 条", severityName(g.severity), g.title, g.rule, len(g.findings))
+		p.line("[%s] %s（%s）%d 条", SeverityName(g.severity), g.title, g.rule, len(g.findings))
 		for i, f := range g.findings {
 			if !opt.Verbose && i == opt.Limit {
 				p.line("    … 另有 %d 条，使用 -v 查看全部", len(g.findings)-opt.Limit)

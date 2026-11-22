@@ -79,3 +79,19 @@ func TestDeployHonorsLeasesOfOtherTools(t *testing.T) {
 		t.Errorf("leases left behind: %+v", held)
 	}
 }
+
+func TestItemDeviceCarriesRoleName(t *testing.T) {
+	t.Parallel()
+	b := bundle(t)
+	d := workflow.ItemDevice(b.Items[0])
+	if d.Role != b.Items[0].Member.Role.String() || d.Role == "" {
+		t.Fatalf("role = %q, want %q", d.Role, b.Items[0].Member.Role)
+	}
+	p, err := authz.Decode([]byte("roles: [{name: leaf, permissions: [deploy], scope: ['role=" + d.Role + "']}]\nbindings: {alice: [leaf]}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Authorize("alice", authz.PermDeploy, d); err != nil {
+		t.Fatalf("role scope does not match: %v", err)
+	}
+}
