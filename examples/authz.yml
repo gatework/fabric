@@ -1,0 +1,19 @@
+# fabric authorization policy (netops authz). Pass it with
+#   fabric deploy --authz examples/authz.yml ...
+#   fabric rollback --authz examples/authz.yml ...
+# The actor is $USER. Scope uses device selectors: id= is the switch name,
+# site= the region, role= leaf/border/spine. Rollback only knows the
+# management address, so scope rollback by address or prefix (or leave it
+# unscoped).
+roles:
+  - name: dc1-change
+    permissions: [deploy]
+    scope: ["site=dc1"]
+  - name: rollback
+    permissions: [rollback]
+    scope: ["10.0.0.0/16"]
+  - name: network-admin
+    permissions: [admin]
+bindings:
+  alice: [dc1-change, rollback]
+  carol: [network-admin]

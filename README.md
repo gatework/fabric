@@ -13,6 +13,7 @@
 | 规划 | `fabric plan` | 意图（+基线）→ 每台交换机有序操作 → 模拟收敛 + 安全检查 → NX-OS 命令与回滚脚本 → 分批 |
 | 下发 | `fabric deploy` | 默认预览；`--apply --confirm <计划ID>` 才写入。checkpoint → 逐行写入 → 回读验证 → 健康门限；任一失败停止后续批次 |
 | 回滚 | `fabric rollback` | `rollback running-config checkpoint <名> atomic` |
+| 互斥与授权 | `--authz`、`--lease-ttl` | 下发与回滚前取跨工具设备租约（与 wireless、firemon 共享）；可选按角色和站点授权，见 `examples/authz.yml` |
 
 ## 日常业务（类似无线控制器的集中管理）
 

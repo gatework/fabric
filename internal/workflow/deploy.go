@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/gatework/netops/apply"
+	ndevice "github.com/gatework/netops/device"
 	"github.com/gatework/netops/failure"
+	"github.com/gatework/netops/lease"
 
 	"github.com/gatework/fabric/device"
 	"github.com/gatework/fabric/governance"
@@ -85,11 +87,13 @@ type DeployReport struct {
 	Results  []SwitchResult      `json:"results"`
 	// StoppedAt is the wave whose failure stopped the rollout, or zero.
 	StoppedAt int `json:"stopped_at,omitempty"`
+	// Denied lists the authorization refusals that stopped the bundle.
+	Denied []string `json:"denied,omitempty"`
 }
 
 // OK reports whether the gate passed and every switch was verified.
 func (r DeployReport) OK() bool {
-	if !r.Decision.Allowed {
+	if !r.Decision.Allowed || len(r.Denied) > 0 {
 		return false
 	}
 	for _, s := range r.Results {
@@ -107,9 +111,18 @@ type DeployRequest struct {
 	Journal Executions
 	Save    bool
 	// Gate holds the operator's declarations for the change gate.
-	Gate   governance.GateOptions
-	Now    func() time.Time
-	Logger *slog.Logger
+	Gate governance.GateOptions
+	// Authorize, when set, must allow every switch of the bundle before
+	// any device is contacted; one refusal refuses the bundle.
+	Authorize func(ndevice.Device) error
+	// Leases, when set, leases each wave's switches by management address
+	// before the wave and releases them after it, so that no other gatework
+	// tool changes them meanwhile. A conflict fails the wave.
+	Leases   *lease.Manager
+	Holder   lease.Holder
+	LeaseTTL time.Duration // zero means one hour
+	Now      func() time.Time
+	Logger   *slog.Logger
 }
 
 // Deploy executes the bundle wave by wave. Switches of a wave run
@@ -132,6 +145,12 @@ func Deploy(ctx context.Context, req DeployRequest) (rep DeployReport) {
 	if req.Logger == nil {
 		req.Logger = slog.New(slog.DiscardHandler)
 	}
+	if rep.Denied = denials(req); len(rep.Denied) > 0 {
+		return rep
+	}
+	if req.Holder.Purpose == "" {
+		req.Holder.Purpose = req.Bundle.ID
+	}
 	for _, w := range req.Bundle.Waves {
 		if rep.StoppedAt != 0 || ctx.Err() != nil {
 			for _, m := range w.Switches {
@@ -139,7 +158,18 @@ func Deploy(ctx context.Context, req DeployRequest) (rep DeployReport) {
 			}
 			continue
 		}
+		set, conflict := leaseWave(ctx, req, w)
+		if conflict != nil {
+			rep.Results = append(rep.Results, conflict...)
+			rep.StoppedAt = w.Index
+			continue
+		}
 		results := runWave(ctx, req, w)
+		if req.Leases != nil {
+			if err := req.Leases.Release(context.WithoutCancel(ctx), set); err != nil {
+				req.Logger.WarnContext(ctx, "leases not released", "wave", w.Index, "error", err)
+			}
+		}
 		rep.Results = append(rep.Results, results...)
 		for _, r := range results {
 			if r.Outcome != OutcomeVerified {
@@ -314,3 +344,62 @@ func Rollback(ctx context.Context, sw Switch, checkpoint string) (RollbackResult
 
 // code is the stable failure code of err for reports.
 func code(err error) string { return string(failure.Primary(err)) }
+
+// ItemDevice describes a bundle item as a device, for authorization and
+// leases: ID and name are the switch name, the site is its region.
+func ItemDevice(it *Item) ndevice.Device {
+	addr, _ := netip.ParseAddr(it.Mgmt)
+	return ndevice.Device{
+		ID: it.Member.Name, Name: it.Member.Name, Mgmt: addr, Platform: nxos.Platform,
+		Role: string(it.Member.Role), Site: it.Member.Region,
+	}
+}
+
+// leaseWave leases the wave's switches. On a conflict it returns the
+// wave's results, every switch failed, and nothing is contacted.
+func leaseWave(ctx context.Context, req DeployRequest, w rollout.Wave) (lease.Set, []SwitchResult) {
+	if req.Leases == nil {
+		return lease.Set{}, nil
+	}
+	var keys []string
+	for _, m := range w.Switches {
+		if it, ok := req.Bundle.Item(m.Name); ok {
+			keys = append(keys, lease.Key(ItemDevice(it)))
+		}
+	}
+	ttl := req.LeaseTTL
+	if ttl <= 0 {
+		ttl = time.Hour
+	}
+	set, err := req.Leases.Acquire(ctx, keys, req.Holder, ttl)
+	if err == nil {
+		return set, nil
+	}
+	detail := "lease: " + failure.Primary(err).String()
+	if held, ok := errors.AsType[*lease.HeldError](err); ok {
+		detail = "租约冲突：" + held.Lease.Device + " 被 " + held.Lease.Holder.String() + " 占用至 " + held.Lease.Expires.Local().Format(time.DateTime)
+	}
+	out := make([]SwitchResult, 0, len(w.Switches))
+	for _, m := range w.Switches {
+		r := SwitchResult{Switch: m.Name, Wave: w.Index, Outcome: OutcomeFailed, Detail: detail}
+		if it, ok := req.Bundle.Item(m.Name); ok {
+			r.Mgmt = it.Mgmt
+		}
+		out = append(out, r)
+	}
+	return lease.Set{}, out
+}
+
+// denials returns the authorization refusals of the bundle's switches.
+func denials(req DeployRequest) []string {
+	if req.Authorize == nil {
+		return nil
+	}
+	var out []string
+	for _, it := range req.Bundle.Items {
+		if err := req.Authorize(ItemDevice(it)); err != nil {
+			out = append(out, err.Error())
+		}
+	}
+	return out
+}
