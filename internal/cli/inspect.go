@@ -85,36 +85,25 @@ func printSwitchDetail(w io.Writer, d workflow.SwitchDetail, verbose bool) {
 }
 
 func printUplinks(w io.Writer, d workflow.SwitchDetail, verbose bool) {
-	if len(d.Links) == 0 {
+	audits := onlySwitch([]topology.Audit{d.Topology}, d.Switch.Name)
+	if len(audits) == 0 && len(d.Topology.Neighbors) == 0 {
 		return
 	}
-	switch {
-	case d.Uplinks != nil:
-		u := d.Uplinks
-		_ = term.Printf(w, "\n上行：%s，健康 %d/%d，可达 spine %s%s\n", u.Redundancy, u.Healthy, u.Declared, term.Dash(strings.Join(u.Spines, "、")), lostSuffix(*u))
-		if u.Asymmetric() {
-			_ = term.Printf(w, "  ⚠ 上行速率不一致：%s（ECMP 按条数均分流量，低速链路先拥塞）\n", strings.Join(u.Speeds, " / "))
-		}
-	case d.Downlinks != nil:
-		_ = term.Printf(w, "\n下联：健康 %d/%d\n", d.Downlinks.Healthy, d.Downlinks.Declared)
-		for _, u := range d.AtRisk {
-			_ = term.Printf(w, "  ⚠ %s 失去到本机的上行，现为%s（健康 %d/%d）\n", u.Switch, u.Redundancy, u.Healthy, u.Declared)
-		}
-	default:
-		_ = term.Printf(w, "\nfabric 互联：%d 条\n", len(d.Links))
+	a := d.Topology
+	if len(audits) > 0 {
+		a = audits[0]
 	}
-	links := d.Links
-	if !verbose && len(links) > compactRows {
-		links = nil
-		for _, c := range d.Links {
-			if c.Diagnosis != nil {
-				links = append(links, c)
-			}
-		}
-		_ = term.Printf(w, "  其余 %d 条逐层验证正常，-v 显示全部\n", len(d.Links)-len(links))
+	_ = term.Printf(w, "\n邻居拓扑：\n")
+	printSwitchTree(w, a, d.Switch.Name, verbose)
+	if u := d.Uplinks; u != nil && u.Asymmetric() {
+		_ = term.Printf(w, "  ⚠ 上行速率不一致：%s（ECMP 按条数均分流量，低速链路先拥塞）\n", strings.Join(u.Speeds, " / "))
 	}
-	if len(links) > 0 {
-		printLinks(w, topology.Audit{Links: links}, d.Switch.Name)
+	if d.Downlinks != nil {
+		_ = term.Printf(w, "  下联：健康 %d/%d\n", d.Downlinks.Healthy, d.Downlinks.Declared)
+		printSpineRisk(w, d.Switch.Name, a.AtRisk())
+	}
+	if verbose && len(d.Links) > 0 {
+		printLinks(w, topology.Audit{Links: d.Links}, d.Switch.Name)
 	}
 	for _, c := range d.Links {
 		if c.Diagnosis != nil {

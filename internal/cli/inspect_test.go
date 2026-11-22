@@ -78,3 +78,16 @@ func TestCompletionOffersSwitchesAndRegions(t *testing.T) {
 		t.Errorf("severity completion:\n%s", out)
 	}
 }
+
+func TestTopologyDrawsTheFabric(t *testing.T) {
+	t.Parallel()
+	snap := snapshotDir(t)
+	_, out, errb := runCLI(t, "topology", "--snapshot", snap, "--intent", testIntent)
+	if !strings.Contains(out, "图例") || !strings.Contains(out, "DC1-LEF01") {
+		t.Errorf("region diagram:\n%s\n%s", out, errb)
+	}
+	_, out, _ = runCLI(t, "topology", "--snapshot", snap, "--intent", testIntent, "--switch", "DC1-LEF01")
+	if !strings.Contains(out, "└──") || !strings.Contains(out, "DC1-LEF01") {
+		t.Errorf("switch tree:\n%s", out)
+	}
+}
