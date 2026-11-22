@@ -7,6 +7,8 @@
 | 能力 | 命令 | 说明 |
 |---|---|---|
 | 采集 | `fabric collect` | 每台交换机一个目录：running-config 与 11 个 show 命令的原始回显（与现有快照格式兼容） |
+| 交换机详情 | `fabric switch show <名称>` | 健康评分、上行/下联与互联明细、OSPF 与 BGP EVPN 会话（按对端名称）、NVE、vPC、聚合、本机发现；长表只列异常，`-v` 显示全部 |
+| 布线与上行 | `fabric topology` | 逐层验证每条互联（物理 → CDP → 配置 → OSPF），给出两端 L2/L3、地址、状态、速率、MTU、根因与处置建议；评估每台 VTEP 的上行冗余与速率对称；`--matrix`、`--switch`、`--all` |
 | 检查 | `fabric check` | 42 条规则：VNI 配置链、运行状态、vPC/VTEP、安全、跨 VTEP 一致性、意图/基线偏差、相对上次采集的退化 |
 | 存量纳管 | `fabric import` | 从现网反推意图草稿，分歧列为冲突，不猜测 |
 | 基线 | `fabric baseline derive` | 按现网多数值生成黄金配置草稿（默认 → 角色 → 区域 → 区域内角色） |
@@ -14,6 +16,8 @@
 | 下发 | `fabric deploy` | 默认预览；`--apply --confirm <计划ID>` 才写入。checkpoint → 逐行写入 → 回读验证 → 健康门限；任一失败停止后续批次 |
 | 回滚 | `fabric rollback` | `rollback running-config checkpoint <名> atomic` |
 | 互斥与授权 | `--authz`、`--lease-ttl` | 下发与回滚前取跨工具设备租约（与 wireless、firemon 共享）；可选按角色和站点授权，见 `examples/authz.yml` |
+
+所有视图先给结论再给明细，末尾给出下一步命令。`check` 支持 `--switch`、`--severity` 过滤；`status` 列出每台交换机的主要问题。交换机名、区域名与级别支持 Tab 补全（`fabric completion zsh|bash|fish`），补全读取 `--intent` 或 `fabric.yml` 中的意图。
 
 ## 日常业务（类似无线控制器的集中管理）
 

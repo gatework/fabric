@@ -3,20 +3,24 @@ package cli
 import (
 	"cmp"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/gatework/netops/assess"
 	"github.com/gatework/netops/evidence"
+	"github.com/gatework/netops/term"
 
 	"github.com/gatework/fabric/capacity"
+	"github.com/gatework/fabric/check"
 	"github.com/gatework/fabric/device"
 	"github.com/gatework/fabric/endpoint"
 	"github.com/gatework/fabric/internal/bootstrap"
 	"github.com/gatework/fabric/internal/workflow"
+	"github.com/gatework/fabric/report"
 	"github.com/gatework/fabric/status"
-	"github.com/gatework/fabric/topology"
 )
 
 func newStatus(e env) *cobra.Command {
@@ -35,14 +39,14 @@ func newStatus(e env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			rep, _, err := workflow.Status(cmd.Context(), workflow.CheckRequest{Fleet: fleet, Baseline: base, Region: region})
+			rep, findings, err := workflow.Status(cmd.Context(), workflow.CheckRequest{Fleet: fleet, Baseline: base, Region: region})
 			if err != nil {
 				return err
 			}
 			if asJSON {
 				return writeJSON(e, rep)
 			}
-			printStatus(e, rep, verbose)
+			printStatus(e, rep, topIssues(findings), verbose)
 			return nil
 		},
 	}
@@ -65,27 +69,59 @@ func ratio(r status.Ratio) string {
 	}
 }
 
-func printStatus(e env, rep status.Report, verbose bool) {
-	w := e.stdout
-	for _, r := range rep.Regions {
-		_, _ = fmt.Fprintf(w, "区域 %s：%s（最低 %d，平均 %d）  正常 %d / 降级 %d / 故障 %d / 未知 %d\n", r.Name, r.Level, r.Worst, r.Mean,
-			r.Levels["正常"], r.Levels["降级"], r.Levels["故障"], r.Levels["未知"])
-		limit := len(r.Switches)
-		if !verbose {
-			limit = min(limit, 5)
+// topIssues returns, per switch name, its most severe finding.
+func topIssues(rep check.Report) map[string]string {
+	best := map[string]assess.Finding{}
+	for _, f := range rep.Findings() {
+		for _, p := range f.Subject.Parts() {
+			if p.Kind != "switch" {
+				continue
+			}
+			if cur, ok := best[p.Key]; !ok || f.Severity > cur.Severity {
+				best[p.Key] = f
+			}
 		}
-		if limit == 0 {
+	}
+	out := map[string]string{}
+	for name, f := range best {
+		out[name] = "[" + report.SeverityName(f.Severity) + "] " + f.Title
+	}
+	return out
+}
+
+func printStatus(e env, rep status.Report, issues map[string]string, verbose bool) {
+	w := e.stdout
+	worst, worstScore := "", 101
+	for _, r := range rep.Regions {
+		_ = term.Printf(w, "区域 %s：%s（最低 %d，平均 %d）  正常 %d / 降级 %d / 故障 %d / 未知 %d\n", r.Name, r.Level, r.Worst, r.Mean,
+			r.Levels["正常"], r.Levels["降级"], r.Levels["故障"], r.Levels["未知"])
+		if len(r.Switches) == 0 {
 			continue
 		}
-		_, _ = fmt.Fprintf(w, "  %-18s %-6s %4s %-4s %-8s %-7s %-6s %-8s %-4s %-6s %s\n", "交换机", "角色", "评分", "等级", "NVE对端", "EVPN", "OSPF", "VNI", "vPC", "聚合", "发现(严重/高/中/低)")
-		for _, s := range r.Switches[:limit] {
-			_, _ = fmt.Fprintf(w, "  %-18s %-6s %4d %-4s %-8s %-7s %-6s %-8s %-4s %-6s %d/%d/%d/%d\n", s.Name, s.Role, s.Score, s.Level,
+		t := term.NewTable("交换机", "角色", "评分", "等级", "NVE对端", "EVPN", "OSPF", "VNI", "vPC", "聚合", "发现(严/高/中/低)", "主要问题")
+		for _, s := range r.Switches {
+			t.Add(s.Name, s.Role.String(), fmt.Sprint(s.Score), s.Level.String(),
 				ratio(s.NVEPeers), ratio(s.Sessions), ratio(s.OSPF), ratio(s.VNIs), ratio(s.VPC), ratio(s.Bundles),
-				s.Findings["critical"], s.Findings["high"], s.Findings["medium"], s.Findings["low"])
+				fmt.Sprintf("%d/%d/%d/%d", s.Findings["critical"], s.Findings["high"], s.Findings["medium"], s.Findings["low"]), issues[s.Name])
 		}
-		if limit < len(r.Switches) {
-			_, _ = fmt.Fprintf(w, "  … 另有 %d 台，使用 -v 查看全部（按评分从低到高）\n", len(r.Switches)-limit)
+		limit := 5
+		if verbose {
+			limit = 0
 		}
+		var b strings.Builder
+		omitted, _ := t.Render(&b, limit)
+		for line := range strings.SplitSeq(strings.TrimRight(b.String(), "\n"), "\n") {
+			_, _ = io.WriteString(w, "  "+line+"\n")
+		}
+		if omitted > 0 {
+			_ = term.Printf(w, "  … 另有 %d 台，使用 -v 查看全部（按评分从低到高）\n", omitted)
+		}
+		if s := r.Switches[0]; s.Level != status.LevelUnknown && s.Score < worstScore {
+			worst, worstScore = s.Name, s.Score
+		}
+	}
+	if worst != "" {
+		_ = term.Printf(w, "\n下一步：fabric switch show %s（最低分）· fabric topology · fabric check --severity high\n", worst)
 	}
 }
 
@@ -137,80 +173,6 @@ func printLocate(e env, res endpoint.Result) {
 	for _, a := range res.Anomalies {
 		_, _ = fmt.Fprintf(w, "  ⚠ %s\n", a)
 	}
-}
-
-func newTopology(e env) *cobra.Command {
-	var ff fleetFlags
-	var region string
-	var asJSON bool
-	c := &cobra.Command{
-		Use:   "topology",
-		Short: "布线审计：意图互联与 CDP 对照，输出 leaf × spine 矩阵",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			fleet, err := ff.load(cmd, []evidence.Dimension{device.DimConfig, device.DimCDP})
-			if err != nil {
-				return err
-			}
-			audits := workflow.Topology(fleet, region)
-			if asJSON {
-				return writeJSON(e, audits)
-			}
-			bad := printTopology(e, audits)
-			if bad > 0 {
-				return exit(ExitFindings, "")
-			}
-			return nil
-		},
-	}
-	ff.bind(c, true)
-	c.Flags().StringVar(&region, "region", "", "只看一个区域")
-	c.Flags().BoolVar(&asJSON, "json", false, "输出 JSON")
-	return c
-}
-
-func cell(s topology.State, ok bool) string {
-	switch {
-	case !ok:
-		return "·"
-	case s == topology.StateOK:
-		return "✓"
-	case s == topology.StateMissing:
-		return "✗"
-	case s == topology.StateMiscabled:
-		return "≠"
-	case s == topology.StateUndeclared:
-		return "+"
-	default:
-		return "?"
-	}
-}
-
-func printTopology(e env, audits []topology.Audit) int {
-	w := e.stdout
-	bad := 0
-	for _, a := range audits {
-		_, _ = fmt.Fprintf(w, "区域 %s：%d 条互联（✓ 正常  ✗ 缺失  ≠ 错接  + 未声明  ? 未知  · 无互联）\n", a.Region, len(a.Links))
-		_, _ = fmt.Fprintf(w, "  %-18s %s\n", "", strings.Join(a.Spines, "  "))
-		for _, v := range a.VTEPs {
-			var cells []string
-			for _, sp := range a.Spines {
-				st, ok := a.Cells[v+"|"+sp]
-				cells = append(cells, fmt.Sprintf("%-*s", len(sp), cell(st, ok)))
-			}
-			_, _ = fmt.Fprintf(w, "  %-18s %s\n", v, strings.Join(cells, "  "))
-		}
-		for _, c := range a.Links {
-			if c.State != topology.StateOK || len(c.Mismatch) > 0 {
-				bad++
-				detail := c.Detail
-				if len(c.Mismatch) > 0 {
-					detail = strings.TrimPrefix(detail+"；两端不一致："+strings.Join(c.Mismatch, "，"), "；")
-				}
-				_, _ = fmt.Fprintf(w, "  %s %s：%s\n", c.State, c.Name, detail)
-			}
-		}
-	}
-	return bad
 }
 
 func newCapacity(e env) *cobra.Command {

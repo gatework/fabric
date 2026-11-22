@@ -2,6 +2,9 @@
 
 | Term | Meaning in fabric |
 |---|---|
+| **Layered link verification** | A fabric link checked bottom up: physical, neighbor (CDP), configuration, routing (OSPF). Its **fault** is the lowest failing layer. |
+| **Uplink redundancy** | A VTEP's healthy uplinks to the spines: full, degraded, single path (one healthy uplink left) or isolated. |
+| **ECMP asymmetry** | Healthy uplinks of one VTEP at different speeds; ECMP splits flows per link, so the slower link congests first. |
 | **Region** | One site. Runs exactly one fabric; the unit of numbering, baseline overrides and rollout grouping. |
 | **Fabric** | The VXLAN EVPN overlay of a region: one BGP AS, spines as route reflectors, one anycast gateway MAC. |
 | **Switch** | A managed Nexus switch identified by its management address; has a **role**: spine, leaf or border. |

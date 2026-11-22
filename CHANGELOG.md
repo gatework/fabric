@@ -4,6 +4,18 @@
 
 ### Added
 
+- `fabric topology` 逐层验证每条 fabric 互联：物理（两端端口状态与原因）→ CDP 邻居 → 配置（三层路由口、未 shutdown、意图地址、两端 MTU/OSPF/子网一致）→ OSPF（每个已采集端都 FULL）。故障定位到最低失败层，给出两端 L2/L3、互联地址、状态、速率、MTU、原因、影响与处置建议。默认只列问题；`--matrix` 显示 leaf × spine 矩阵（含上行数与冗余等级），`--switch` 查看一台交换机的全部 fabric 端口，`--all` 列出全部互联（ADR 0012）。
+- 上行冗余：每台 VTEP 的健康上行、可达与失去的 spine，等级为冗余正常 / 降级 / 单上行 / 孤立 / 未知；每台 spine 的健康下联；健康上行速率不一致（ECMP 不对称）告警；意图中有但快照中没有的交换机。
+- `fabric switch show <名称>`（别名 `inspect`）：单台交换机全景，包括健康评分、上行或下联、互联明细、OSPF 与 BGP EVPN 会话（显示对端名称）、NVE 对端与 VNI、vPC、聚合，以及按标题归并的本机发现。
+- `fabric check --switch`、`--severity`；`fabric status` 增加“主要问题”列，表格按中文字宽对齐。
+- 每个视图末尾给出下一步命令；`--switch`、`--region`、`--severity` 与 `switch show` 支持 Tab 补全。
+
+### Fixed
+
+- 下发授权使用的设备角色写成了枚举的原始字节，授权策略中的 `role=leaf` 等范围永远匹配不到；现在使用角色名称。
+
+### Added
+
 - `fabric deploy` 与 `fabric rollback` 取跨工具设备租约（netops `lease`，按管理地址，存放在 `~/.local/share/gatework/leases`，可用 `$GATEWORK_LEASES_DIR` 覆盖）。另一工具（wireless、firemon）正在修改的交换机所在批次直接失败并报告占用者，后续批次停止。`--lease-ttl` 设定租约时长，默认 1 小时；进程异常退出后租约到期自动释放。
 - `--authz <策略文件>`：按 netops `authz` 检查 `$USER` 的 `deploy`、`rollback` 权限。任何一台越权，整个计划都会被拒绝，不连接设备（报告 `denied`）。省略此参数时不做权限检查，行为与之前一致。
 - 示例策略 `examples/authz.yml`。

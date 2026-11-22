@@ -207,8 +207,8 @@ func parseMembers(list []string) (map[string][]string, error) {
 }
 
 func newSwitch(e env) *cobra.Command {
-	c := &cobra.Command{Use: "switch", Short: "交换机上线、下线与 day-0 配置"}
-	c.AddCommand(newSwitchAdd(e), newSwitchRemove(e), newSwitchDay0(e))
+	c := &cobra.Command{Use: "switch", Short: "交换机详情、上线、下线与 day-0 配置"}
+	c.AddCommand(newSwitchShow(e), newSwitchAdd(e), newSwitchRemove(e), newSwitchDay0(e))
 	return c
 }
 

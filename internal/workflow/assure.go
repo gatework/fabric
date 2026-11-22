@@ -1,13 +1,16 @@
 package workflow
 
 import (
+	"cmp"
 	"context"
+	"slices"
 
 	"github.com/gatework/netops/assess"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/capacity"
 	"github.com/gatework/fabric/check"
+	"github.com/gatework/fabric/device"
 	"github.com/gatework/fabric/endpoint"
 	"github.com/gatework/fabric/status"
 	"github.com/gatework/fabric/topology"
@@ -86,4 +89,104 @@ func Capacity(f *Fleet, region string, lim capacity.Limits) []capacity.Region {
 		out = append(out, capacity.Compute(name, ir, f.Members(name), lim))
 	}
 	return out
+}
+
+// SwitchDetail is everything known about one switch: its health, its
+// fabric uplinks, its control-plane sessions and its findings.
+type SwitchDetail struct {
+	Switch  *device.Switch       `json:"-"`
+	Health  status.Switch        `json:"health"`
+	Links   []topology.LinkCheck `json:"links"`
+	Uplinks *topology.Uplinks    `json:"uplinks,omitempty"`
+	// Downlinks is set for a spine; AtRisk lists the VTEPs that lost
+	// redundancy towards it.
+	Downlinks *topology.SpineLoad `json:"downlinks,omitempty"`
+	AtRisk    []topology.Uplinks  `json:"at_risk,omitempty"`
+	// Findings are the switch's own findings and the region findings
+	// that name it, most severe first.
+	Findings []assess.Finding `json:"findings"`
+	// Peers names the switches by router ID and VTEP address, so that
+	// sessions read as names.
+	Peers map[string]string `json:"-"`
+}
+
+// Inspect builds the detail of one switch.
+func Inspect(ctx context.Context, req CheckRequest, name string) (SwitchDetail, error) {
+	sw, err := req.Fleet.Switch(name)
+	if err != nil {
+		return SwitchDetail{}, err
+	}
+	req.Region = sw.Region
+	health, rep, err := Status(ctx, req)
+	if err != nil {
+		return SwitchDetail{}, err
+	}
+	d := SwitchDetail{Switch: sw, Peers: peerNames(req.Fleet, sw.Region)}
+	for _, r := range health.Regions {
+		if i := slices.IndexFunc(r.Switches, func(s status.Switch) bool { return s.Name == sw.Name }); i >= 0 {
+			d.Health = r.Switches[i]
+		}
+	}
+	for _, f := range regionFindings(rep, req.Fleet, sw.Region) {
+		if Names(f.Subject, sw.Name) {
+			d.Findings = append(d.Findings, f)
+		}
+	}
+	slices.SortStableFunc(d.Findings, func(a, b assess.Finding) int { return cmp.Compare(b.Severity, a.Severity) })
+	for _, a := range Topology(req.Fleet, sw.Region) {
+		for _, c := range a.Links {
+			if c.A.Switch == sw.Name || c.B.Switch == sw.Name {
+				d.Links = append(d.Links, c)
+			}
+		}
+		if i := slices.IndexFunc(a.Uplinks, func(u topology.Uplinks) bool { return u.Switch == sw.Name }); i >= 0 {
+			d.Uplinks = &a.Uplinks[i]
+		}
+		if i := slices.IndexFunc(a.SpineLoads, func(s topology.SpineLoad) bool { return s.Switch == sw.Name }); i >= 0 {
+			d.Downlinks = &a.SpineLoads[i]
+			for _, u := range a.AtRisk() {
+				if slices.Contains(u.Lost, sw.Name) {
+					d.AtRisk = append(d.AtRisk, u)
+				}
+			}
+		}
+	}
+	return d, nil
+}
+
+// peerNames maps the region's router IDs and VTEP addresses to switch
+// names.
+func peerNames(f *Fleet, region string) map[string]string {
+	out := map[string]string{}
+	if f.Intent != nil {
+		if r, ok := f.Intent.Region(region); ok {
+			for _, s := range r.Switches {
+				if s.RouterID.IsValid() {
+					out[s.RouterID.String()] = s.Name
+				}
+				if s.VTEP.IsValid() {
+					out[s.VTEP.String()] = s.Name
+				}
+			}
+		}
+	}
+	for _, peer := range f.Members(region) {
+		if peer.Config == nil {
+			continue
+		}
+		if a, ok := peer.Config.VTEPAddress(); ok {
+			out[a.String()] = peer.Name
+		}
+	}
+	return out
+}
+
+// Names reports whether a finding subject names the switch.
+func Names(s assess.Subject, name string) bool {
+	for _, p := range s.Parts() {
+		if p.Kind == "switch" && p.Key == name {
+			return true
+		}
+	}
+	return false
 }

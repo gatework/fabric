@@ -11,12 +11,14 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/gatework/netops/assess"
 	"github.com/gatework/netops/evidence"
 	"github.com/gatework/netops/store"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/adapter/snapshot"
 	"github.com/gatework/fabric/baseline"
+	"github.com/gatework/fabric/check"
 	"github.com/gatework/fabric/device"
 	"github.com/gatework/fabric/internal/bootstrap"
 	"github.com/gatework/fabric/internal/workflow"
@@ -184,7 +186,7 @@ func (f *fleetFlags) load(cmd *cobra.Command, dims []evidence.Dimension) (*workf
 
 func newCheck(e env) *cobra.Command {
 	var ff fleetFlags
-	var basePath, prevPath, policyPath, region string
+	var basePath, prevPath, policyPath, region, only, minSeverity string
 	var verbose, asJSON bool
 	c := &cobra.Command{
 		Use:   "check",
@@ -206,8 +208,16 @@ func newCheck(e env) *cobra.Command {
 					return err
 				}
 			}
+			if only != "" && region == "" {
+				if sw, err := fleet.Switch(only); err == nil {
+					req.Region = sw.Region
+				}
+			}
 			rep, err := workflow.Check(cmd.Context(), req)
 			if err != nil {
+				return err
+			}
+			if rep, err = filterCheck(rep, fleet, only, minSeverity); err != nil {
 				return err
 			}
 			if asJSON {
@@ -233,7 +243,12 @@ func newCheck(e env) *cobra.Command {
 	c.Flags().StringVar(&prevPath, "previous", "", "上一次采集的快照目录，用于发现运行状态退化")
 	c.Flags().StringVar(&policyPath, "policy", "", "规则策略文件（启用/停用、级别、参数）")
 	c.Flags().StringVar(&region, "region", "", "只检查一个区域")
+	c.Flags().StringVar(&only, "switch", "", "只看与一台交换机有关的发现")
+	c.Flags().StringVar(&minSeverity, "severity", "", "只看不低于该级别的发现：critical、high、medium、low、info")
 	c.Flags().BoolVarP(&verbose, "verbose", "v", false, "列出全部发现")
+	completeSwitches(e, c, "switch")
+	completeRegions(e, c, "region")
+	_ = c.RegisterFlagCompletionFunc("severity", cobra.FixedCompletions([]cobra.Completion{"critical", "high", "medium", "low", "info"}, cobra.ShellCompDirectiveNoFileComp))
 	c.Flags().BoolVar(&asJSON, "json", false, "输出 JSON")
 	return c
 }
@@ -395,4 +410,57 @@ func printBundle(e env, b *workflow.Bundle) {
 			_, _ = fmt.Fprintf(w, "  %s [%s] %d 条命令：%s%s\n", m.Name, m.Role, len(it.Plan.Commands()), strings.Join(slices.Sorted(slices.Values(parts)), "，"), impactText(it))
 		}
 	}
+}
+
+// filterCheck keeps the findings about one switch and at or above a
+// severity. Rule outcomes stay, so coverage is still reported.
+func filterCheck(rep check.Report, fleet *workflow.Fleet, only, minSeverity string) (check.Report, error) {
+	floor := assess.SeverityUnset
+	if minSeverity != "" {
+		s, err := assess.ParseSeverity(minSeverity)
+		if err != nil {
+			return rep, exit(ExitError, "--severity %q 无效，可选 critical、high、medium、low、info", minSeverity)
+		}
+		floor = s
+	}
+	key := ""
+	if only != "" {
+		sw, err := fleet.Switch(only)
+		if err != nil {
+			return rep, exit(ExitError, "%v（可用 Tab 补全交换机名）", err)
+		}
+		key = sw.Key()
+	}
+	if floor == assess.SeverityUnset && only == "" {
+		return rep, nil
+	}
+	keep := func(name string, a assess.Assessment, switchLevel bool) assess.Assessment {
+		var fs []assess.Finding
+		for _, f := range a.Findings {
+			if f.Severity < floor {
+				continue
+			}
+			if only != "" && !(switchLevel && name == key) && !workflow.Names(f.Subject, only) {
+				continue
+			}
+			fs = append(fs, f)
+		}
+		a.Findings = fs
+		a.Counts = map[assess.Severity]int{}
+		for _, f := range fs {
+			a.Counts[f.Severity]++
+		}
+		return a
+	}
+	out := check.Report{Fabrics: map[string]assess.Assessment{}, Switches: map[string]assess.Assessment{}}
+	for name, a := range rep.Fabrics {
+		out.Fabrics[name] = keep(name, a, false)
+	}
+	for name, a := range rep.Switches {
+		if only != "" && name != key {
+			continue
+		}
+		out.Switches[name] = keep(name, a, true)
+	}
+	return out, nil
 }
