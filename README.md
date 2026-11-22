@@ -8,7 +8,7 @@
 |---|---|---|
 | 采集 | `fabric collect` | 每台交换机一个目录：running-config 与 11 个 show 命令的原始回显（与现有快照格式兼容） |
 | 交换机详情 | `fabric switch show <名称>` | 健康评分、上行/下联与互联明细、OSPF 与 BGP EVPN 会话（按对端名称）、NVE、vPC、聚合、本机发现；长表只列异常，`-v` 显示全部 |
-| 布线与上行 | `fabric topology` | 逐层验证每条互联（物理 → CDP → 配置 → OSPF），给出两端 L2/L3、地址、状态、速率、MTU、根因与处置建议；评估每台 VTEP 的上行冗余与速率对称；`--matrix`、`--switch`、`--all` |
+| 拓扑 | `fabric topology` | spine–VTEP 拓扑图：两端端口、速率、故障层与原因、冗余与速率对称、vPC 对；`--switch` 画单机邻居树（fabric 互联、vPC peer-link、外部设备、管理网）；`--detail` 列故障两端详情、原因与处置建议；每条互联按 物理 → CDP → 配置 → OSPF 逐层验证 |
 | 检查 | `fabric check` | 42 条规则：VNI 配置链、运行状态、vPC/VTEP、安全、跨 VTEP 一致性、意图/基线偏差、相对上次采集的退化 |
 | 存量纳管 | `fabric import` | 从现网反推意图草稿，分歧列为冲突，不猜测 |
 | 基线 | `fabric baseline derive` | 按现网多数值生成黄金配置草稿（默认 → 角色 → 区域 → 区域内角色） |

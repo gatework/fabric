@@ -169,3 +169,29 @@ func TestTopologyFlagsAsymmetricUplinks(t *testing.T) {
 		t.Fatalf("asymmetric = %+v", asym)
 	}
 }
+
+func TestTopologyNeighborsAndSessions(t *testing.T) {
+	t.Parallel()
+	f := small()
+	leaf := outputsOf(f, "R00-LEF001")
+	leaf["show cdp neighbors detail"] += "----------------------------------------\nDevice ID:NAS-01\nSystem Name: NAS-01\n\nInterface address(es):\n    IPv4 Address: 192.0.2.50\nPlatform: FAS2720, Capabilities: Host\nInterface: Ethernet1/7, Port ID (outgoing port): e0M\n"
+	a := topology.Run(f.Intent.Regions[0], assemble(f))
+	kinds := map[string]topology.NeighborKind{}
+	for _, n := range a.Neighbors {
+		if n.Switch == "R00-LEF001" {
+			kinds[n.Port+" "+n.Device] = n.Kind
+		}
+	}
+	if kinds["Ethernet1/49 R00-SPN001"] != topology.NeighborFabricLink || kinds["Ethernet1/7 NAS-01"] != topology.NeighborExternal {
+		t.Fatalf("neighbor kinds = %v", kinds)
+	}
+	u := uplinksOf(a, "R00-LEF001")
+	if len(u.BGP) != 2 {
+		t.Fatalf("sessions = %+v", u.BGP)
+	}
+	for _, s := range u.BGP {
+		if s.Verdict != topology.VerdictOK {
+			t.Errorf("session to %s = %+v", s.Spine, s)
+		}
+	}
+}

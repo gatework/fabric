@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Changed
+
+- `fabric topology` 默认输出改为拓扑图：两台 spine 为左右母线，每台 VTEP 一行，连线标出两端端口与速率；粗线表示满速，细线表示低速，虚线加 ✗ 表示故障，并标出最低失败层。行尾注明原因、冗余等级与速率不对称，vPC 对用括号标出。`--switch` 以该交换机为根画出邻居树：fabric 互联（OSPF、BGP EVPN 状态）、vPC peer-link、fabric 内其他交换机、CDP 发现的外部设备与管理网。spine 的树会列出仅剩本机一条上行的 VTEP（本机维护前须先恢复）。故障详情改为 `--detail` 显示。`fabric switch show` 使用同一棵邻居树。
+- CDP 邻居按用途分类，带本地 port-channel 与端口速率；每台 VTEP 到每台 spine 的 BGP EVPN 会话按 router-id 匹配。
+
 ### Added
 
 - `fabric topology` 逐层验证每条 fabric 互联：物理（两端端口状态与原因）→ CDP 邻居 → 配置（三层路由口、未 shutdown、意图地址、两端 MTU/OSPF/子网一致）→ OSPF（每个已采集端都 FULL）。故障定位到最低失败层，给出两端 L2/L3、互联地址、状态、速率、MTU、原因、影响与处置建议。默认只列问题；`--matrix` 显示 leaf × spine 矩阵（含上行数与冗余等级），`--switch` 查看一台交换机的全部 fabric 端口，`--all` 列出全部互联（ADR 0012）。

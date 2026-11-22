@@ -102,6 +102,8 @@ type SwitchDetail struct {
 	// redundancy towards it.
 	Downlinks *topology.SpineLoad `json:"downlinks,omitempty"`
 	AtRisk    []topology.Uplinks  `json:"at_risk,omitempty"`
+	// Topology is the region's audit the switch belongs to.
+	Topology topology.Audit `json:"-"`
 	// Findings are the switch's own findings and the region findings
 	// that name it, most severe first.
 	Findings []assess.Finding `json:"findings"`
@@ -134,6 +136,7 @@ func Inspect(ctx context.Context, req CheckRequest, name string) (SwitchDetail, 
 	}
 	slices.SortStableFunc(d.Findings, func(a, b assess.Finding) int { return cmp.Compare(b.Severity, a.Severity) })
 	for _, a := range Topology(req.Fleet, sw.Region) {
+		d.Topology = a
 		for _, c := range a.Links {
 			if c.A.Switch == sw.Name || c.B.Switch == sw.Name {
 				d.Links = append(d.Links, c)

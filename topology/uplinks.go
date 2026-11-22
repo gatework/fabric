@@ -64,6 +64,8 @@ type Uplinks struct {
 	// means ECMP spreads flows evenly over unequal links, so the slower
 	// one congests first.
 	Speeds []string `json:"speeds,omitempty"`
+	// BGP is the EVPN session to every spine.
+	BGP []Session `json:"bgp,omitempty"`
 }
 
 // Asymmetric reports whether the healthy uplinks run at different speeds.

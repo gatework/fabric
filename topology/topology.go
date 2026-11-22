@@ -85,6 +85,60 @@ type Audit struct {
 	SpineLoads []SpineLoad `json:"spine_loads"`
 	// Unobserved lists intent switches the snapshot has no evidence for.
 	Unobserved []string `json:"unobserved,omitempty"`
+	// Neighbors is every CDP adjacency of the region's switches,
+	// classified; VPCPairs pairs vPC peers by domain.
+	Neighbors []Neighbor `json:"neighbors"`
+	VPCPairs  []VPCPair  `json:"vpc_pairs,omitempty"`
+}
+
+// VPCPair is a vPC domain, its two switches and, per switch, the
+// observed peer-link.
+type VPCPair struct {
+	Domain   int       `json:"domain"`
+	Switches [2]string `json:"switches"`
+	// PeerLinks are indexed like Switches; nil when vPC was not collected.
+	PeerLinks [2]*PeerLink `json:"peer_links"`
+}
+
+// PeerLink is a vPC peer-link as one member of the pair reports it.
+type PeerLink struct {
+	Port        string   `json:"port"`
+	Up          bool     `json:"up"`
+	Virtual     bool     `json:"virtual,omitempty"`
+	Members     []string `json:"members,omitempty"`
+	PeerOK      bool     `json:"peer_ok"`
+	KeepaliveOK bool     `json:"keepalive_ok"`
+}
+
+func peerLinkOf(sw *device.Switch) *PeerLink {
+	if sw == nil || !sw.Has(device.DimVPC) || sw.State.VPC == nil {
+		return nil
+	}
+	v := sw.State.VPC
+	pl := &PeerLink{Virtual: v.VirtualPeerLink, PeerOK: v.PeerOK, KeepaliveOK: v.KeepaliveOK}
+	for _, l := range v.PeerLinks {
+		pl.Port, _ = device.CanonicalInterface(l.Port)
+		pl.Up = l.Up
+	}
+	for _, p := range sw.State.PortChannels {
+		if name, _ := device.CanonicalInterface(p.Name); name == pl.Port && pl.Port != "" {
+			for _, m := range p.Members {
+				port, _ := device.CanonicalInterface(m.Port)
+				pl.Members = append(pl.Members, port)
+			}
+		}
+	}
+	return pl
+}
+
+// PairOf returns the vPC pair the switch belongs to.
+func (a *Audit) PairOf(sw string) (VPCPair, bool) {
+	for _, p := range a.VPCPairs {
+		if p.Switches[0] == sw || p.Switches[1] == sw {
+			return p, true
+		}
+	}
+	return VPCPair{}, false
 }
 
 // Faults returns the links that need attention, lowest layer first.
@@ -169,6 +223,17 @@ func Run(r *fabric.Region, switches []*device.Switch) Audit {
 	}
 	a.matrix(r)
 	a.redundancy(r, ev)
+	a.Neighbors = neighbors(r, switches, a.Links, ev)
+	for i := range a.Uplinks {
+		a.Uplinks[i].BGP = sessions(r, byName[a.Uplinks[i].Switch])
+	}
+	for _, p := range r.VPCPairs {
+		pair := VPCPair{Domain: p.Domain, Switches: [2]string{p.Members[0].Switch, p.Members[1].Switch}}
+		for i, name := range pair.Switches {
+			pair.PeerLinks[i] = peerLinkOf(byName[name])
+		}
+		a.VPCPairs = append(a.VPCPairs, pair)
+	}
 	for _, s := range r.Switches {
 		if _, ok := byName[s.Name]; !ok {
 			a.Unobserved = append(a.Unobserved, s.Name)

@@ -17,9 +17,11 @@ import (
 )
 
 type topologyView struct {
-	matrix bool
-	all    bool
-	sw     string
+	matrix  bool
+	all     bool
+	detail  bool
+	verbose bool
+	sw      string
 }
 
 func newTopology(e env) *cobra.Command {
@@ -29,13 +31,13 @@ func newTopology(e env) *cobra.Command {
 	var asJSON bool
 	c := &cobra.Command{
 		Use:   "topology",
-		Short: "布线与上行审计：逐层定位故障互联（物理/CDP/配置/OSPF），评估每台 VTEP 的上行冗余",
-		Long: "按意图中的互联逐条验证：端口状态 → CDP 邻居 → 两端配置 → OSPF 邻接，故障定位到最低的失败层并给出原因与处置建议；" +
-			"再按 VTEP 统计到 spine 的健康上行，标出单上行与孤立的交换机。\n" +
-			"默认只列需要处理的问题；--matrix 显示 leaf × spine 矩阵，--switch 查看一台交换机的全部 fabric 端口，--all 列出全部互联。",
-		Example: "  fabric topology\n  fabric topology --region sha2 --matrix\n  fabric topology --switch SHA2-BDR02",
+		Short: "fabric 拓扑：spine–VTEP 连线图与单机邻居树，逐层验证每条互联（物理/CDP/配置/OSPF）与上行冗余",
+		Long: "画出每个区域的 spine–VTEP 拓扑：两台 spine 为左右母线，每台 VTEP 一行，连线标出两端端口、速率与状态，故障处断开并注明最低失败层与原因；vPC 对用括号标出。\n" +
+			"--switch 以一台交换机为根画出全部邻居：fabric 互联、fabric 内其他交换机（如 border 对、vPC peer）、外部设备与管理网。\n" +
+			"每条互联按 端口状态 → CDP 邻居 → 两端配置 → OSPF 邻接 逐层验证；--detail 列出每个故障的两端详情、原因、影响与处置建议，--all 列出全部互联的逐层结果。",
+		Example: "  fabric topology\n  fabric topology --region sha2 --detail\n  fabric topology --switch SHA2-BDR02",
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			fleet, err := ff.load(cmd, []evidence.Dimension{device.DimConfig, device.DimCDP, device.DimInterfaces, device.DimOSPF})
+			fleet, err := ff.load(cmd, []evidence.Dimension{device.DimConfig, device.DimCDP, device.DimInterfaces, device.DimOSPF, device.DimBGP, device.DimPortChannels, device.DimVPC})
 			if err != nil {
 				return err
 			}
@@ -62,9 +64,11 @@ func newTopology(e env) *cobra.Command {
 	}
 	ff.bind(c, true)
 	c.Flags().StringVar(&region, "region", "", "只看一个区域")
-	c.Flags().StringVar(&view.sw, "switch", "", "只看一台交换机的 fabric 端口")
-	c.Flags().BoolVar(&view.matrix, "matrix", false, "显示 leaf × spine 矩阵")
+	c.Flags().StringVar(&view.sw, "switch", "", "以一台交换机为根画出它的全部邻居")
+	c.Flags().BoolVar(&view.detail, "detail", false, "列出每个故障的两端详情、原因、影响与处置建议")
+	c.Flags().BoolVar(&view.matrix, "matrix", false, "附 leaf × spine 符号矩阵")
 	c.Flags().BoolVar(&view.all, "all", false, "列出全部互联及逐层结果")
+	c.Flags().BoolVarP(&view.verbose, "verbose", "v", false, "邻居树中列出管理网邻居")
 	c.Flags().BoolVar(&asJSON, "json", false, "输出 JSON")
 	completeSwitches(e, c, "switch")
 	completeRegions(e, c, "region")
@@ -76,14 +80,18 @@ func onlySwitch(audits []topology.Audit, name string) []topology.Audit {
 	var out []topology.Audit
 	for _, a := range audits {
 		var links []topology.LinkCheck
+		keep := map[string]bool{name: true}
 		for _, c := range a.Links {
 			if c.A.Switch == name || c.B.Switch == name {
 				links = append(links, c)
+				keep[c.A.Switch], keep[c.B.Switch] = true, true
 			}
 		}
+		// The far ends' uplinks stay: a spine's tree shows each VTEP's
+		// session to it and the VTEPs that lost redundancy through it.
 		var ups []topology.Uplinks
 		for _, u := range a.Uplinks {
-			if u.Switch == name {
+			if keep[u.Switch] {
 				ups = append(ups, u)
 			}
 		}
@@ -123,35 +131,28 @@ func printTopology(w io.Writer, audits []topology.Audit, view topologyView) int 
 	var next []string
 	for _, a := range audits {
 		faults, risk := a.Faults(), a.AtRisk()
-		problems += len(faults) + len(risk) + len(a.Unobserved)
-		printTopologySummary(w, a, len(faults), risk)
-		if len(a.Unobserved) > 0 {
+		asym := a.Asymmetric()
+		problems += len(faults) + len(risk) + len(a.Unobserved) + len(asym)
+		if view.sw != "" {
+			_ = term.Printf(w, "区域 %s\n", a.Region)
+			printSwitchTree(w, a, view.sw, view.verbose)
+		} else {
+			printTopologySummary(w, a, len(faults), risk)
+			printRegionDiagram(w, a)
+		}
+		if len(a.Unobserved) > 0 && view.sw == "" {
 			_ = term.Printf(w, "  ⚠ 快照中没有 %d 台意图交换机，其互联无法验证：%s\n", len(a.Unobserved), strings.Join(a.Unobserved, "、"))
 		}
-		impact := impactOf(a)
-		for i, c := range faults {
-			printFault(w, i+1, c, impact)
+		if view.detail || view.sw != "" {
+			printTopologyDetail(w, a, view.sw, faults, risk, asym)
 		}
-		if asym := a.Asymmetric(); len(asym) > 0 {
-			problems += len(asym)
-			_ = term.Printf(w, "  上行速率不一致（ECMP 按条数均分流量，低速链路先拥塞）：\n")
-			for _, u := range asym {
-				_ = term.Printf(w, "    %s：%s\n", u.Switch, strings.Join(u.Speeds, " / "))
-			}
-		}
-		if len(risk) > 0 {
-			_ = term.Printf(w, "  上行冗余不足：\n")
-			for _, u := range risk {
-				_ = term.Printf(w, "    %s %s：健康上行 %d/%d，可达 spine %s%s\n", u.Redundancy, u.Switch, u.Healthy, u.Declared,
-					term.Dash(strings.Join(u.Spines, "、")), lostSuffix(u))
-			}
-		}
-		if view.all || view.sw != "" {
+		if view.all {
 			printLinks(w, a, view.sw)
 		}
 		if view.matrix {
 			printMatrix(w, a)
 		}
+		_ = term.Printf(w, "\n")
 		for _, c := range faults {
 			next = appendUnique(next, "fabric switch show "+vtepEnd(a, c))
 		}
@@ -160,10 +161,41 @@ func printTopology(w io.Writer, audits []topology.Audit, view topologyView) int 
 		_ = term.Printf(w, "全部互联逐层验证通过，每台 VTEP 都保持完整的上行冗余。\n")
 	}
 	if len(next) > 0 && view.sw == "" {
-		next = append(next[:min(len(next), 3)], "fabric topology --matrix", "fabric collect（处理后重新采集复核）")
-		_ = term.Printf(w, "\n下一步：%s\n", strings.Join(next, " · "))
+		next = next[:min(len(next), 2)]
+		if !view.detail {
+			next = append(next, "fabric topology --detail（故障详情与处置建议）")
+		}
+		next = append(next, "fabric topology --switch <名称>（单机邻居树）")
+		_ = term.Printf(w, "下一步：%s\n", strings.Join(next, " · "))
 	}
 	return problems
+}
+
+func printTopologyDetail(w io.Writer, a topology.Audit, sw string, faults []topology.LinkCheck, risk, asym []topology.Uplinks) {
+	impact := impactOf(a)
+	if len(faults) > 0 {
+		_ = term.Printf(w, "  故障详情：\n")
+	}
+	for i, c := range faults {
+		printFault(w, i+1, c, impact)
+	}
+	if len(asym) > 0 {
+		_ = term.Printf(w, "  上行速率不一致（ECMP 按条数均分流量，低速链路先拥塞）：\n")
+		for _, u := range asym {
+			_ = term.Printf(w, "    %s：%s\n", u.Switch, strings.Join(u.Speeds, " / "))
+		}
+	}
+	if slices.Contains(a.Spines, sw) {
+		printSpineRisk(w, sw, risk)
+		return
+	}
+	if len(risk) > 0 {
+		_ = term.Printf(w, "  上行冗余不足：\n")
+		for _, u := range risk {
+			_ = term.Printf(w, "    %s %s：健康上行 %d/%d，可达 spine %s%s\n", u.Redundancy, u.Switch, u.Healthy, u.Declared,
+				term.Dash(strings.Join(u.Spines, "、")), lostSuffix(u))
+		}
+	}
 }
 
 func printTopologySummary(w io.Writer, a topology.Audit, faults int, risk []topology.Uplinks) {
@@ -171,21 +203,9 @@ func printTopologySummary(w io.Writer, a topology.Audit, faults int, risk []topo
 	for _, u := range a.Uplinks {
 		counts[u.Redundancy]++
 	}
-	_ = term.Printf(w, "区域 %s：互联 %d 条，正常 %d / 故障 %d；VTEP %d 台，冗余正常 %d / 降级 %d / 单上行 %d / 孤立 %d / 未知 %d\n",
-		a.Region, len(a.Links), len(a.Links)-faults, faults, len(a.Uplinks),
-		counts[topology.RedundancyFull], counts[topology.RedundancyDegraded], counts[topology.RedundancySinglePath],
-		counts[topology.RedundancyIsolated], counts[topology.RedundancyUnknown])
-	var loads []string
-	for _, s := range a.SpineLoads {
-		mark := ""
-		if s.Healthy < s.Declared {
-			mark = " ⚠"
-		}
-		loads = append(loads, fmt.Sprintf("%s %d/%d%s", s.Switch, s.Healthy, s.Declared, mark))
-	}
-	if len(loads) > 0 {
-		_ = term.Printf(w, "  spine 健康下联：%s\n", strings.Join(loads, "，"))
-	}
+	at := counts[topology.RedundancyDegraded] + counts[topology.RedundancySinglePath] + counts[topology.RedundancyIsolated]
+	_ = term.Printf(w, "区域 %s ── spine %d · VTEP %d · 互联 %d（故障 %d）· 冗余不足 %d · 上行速率不对称 %d\n",
+		a.Region, len(a.Spines), len(a.Uplinks), len(a.Links), faults, at, len(a.Asymmetric()))
 	_ = risk
 }
 
@@ -326,5 +346,26 @@ func cell(s topology.State, ok bool) string {
 		return "+"
 	default:
 		return "?"
+	}
+}
+
+// printSpineRisk splits, for one spine, the VTEPs at risk into those that
+// lost it and those that now depend on it alone: reloading the spine
+// would cut the latter off.
+func printSpineRisk(w io.Writer, spine string, risk []topology.Uplinks) {
+	var lost, alone []string
+	for _, u := range risk {
+		switch {
+		case slices.Contains(u.Lost, spine):
+			lost = append(lost, u.Switch)
+		case len(u.Spines) == 1 && u.Spines[0] == spine:
+			alone = append(alone, u.Switch)
+		}
+	}
+	if len(lost) > 0 {
+		_ = term.Printf(w, "  失去到本机上行的 VTEP：%s\n", strings.Join(lost, "、"))
+	}
+	if len(alone) > 0 {
+		_ = term.Printf(w, "  ⚠ 仅剩本机一条上行的 VTEP：%s——本机重启或维护前须先恢复它们的另一条上行\n", strings.Join(alone, "、"))
 	}
 }
