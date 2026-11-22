@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Added
+
+- `fabric deploy` 与 `fabric rollback` 取跨工具设备租约（netops `lease`，按管理地址，存放在 `~/.local/share/gatework/leases`，可用 `$GATEWORK_LEASES_DIR` 覆盖）。另一工具（wireless、firemon）正在修改的交换机所在批次直接失败并报告占用者，后续批次停止。`--lease-ttl` 设定租约时长，默认 1 小时；进程异常退出后租约到期自动释放。
+- `--authz <策略文件>`：按 netops `authz` 检查 `$USER` 的 `deploy`、`rollback` 权限。任何一台越权，整个计划都会被拒绝，不连接设备（报告 `denied`）。省略此参数时不做权限检查，行为与之前一致。
+- 示例策略 `examples/authz.yml`。
+- 共享运维内核更新至 netops v0.5.2。
+
 ## [0.3.1] - 2026-11-21
 
 - 更新设备会话依赖至 net-connector v0.10.3，更新共享运维内核至 netops v0.4.0。

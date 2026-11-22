@@ -11,9 +11,13 @@ import (
 	"github.com/gatework/net-connector/transport/ssh"
 	"github.com/gatework/net-connector/vendors"
 	"github.com/gatework/netops/assess"
+	"github.com/gatework/netops/authz"
+	nbootstrap "github.com/gatework/netops/bootstrap"
 	"github.com/gatework/netops/credential"
 	ndevice "github.com/gatework/netops/device"
+	"github.com/gatework/netops/lease"
 	"github.com/gatework/netops/secret"
+	filelease "github.com/gatework/netops/store/lease"
 
 	"github.com/gatework/fabric"
 	"github.com/gatework/fabric/adapter/netconnector"
@@ -164,4 +168,35 @@ func (s SSH) connector(c Credentials) (*connector.Dialer, error) {
 		return nil, fmt.Errorf("bootstrap: %w", err)
 	}
 	return d, nil
+}
+
+// ReadAuthz reads an authorization policy. An empty path means no policy:
+// the operator running fabric is trusted, as before.
+func ReadAuthz(path string) (*authz.Policy, error) {
+	if path == "" {
+		return nil, nil //nolint:nilnil // no policy is a valid, explicit choice.
+	}
+	body, err := readFile(path)
+	if err != nil {
+		return nil, err
+	}
+	p, err := authz.Decode(body)
+	if err != nil {
+		return nil, fmt.Errorf("bootstrap: %w", err)
+	}
+	return &p, nil
+}
+
+// Leases opens the device lease area shared by every gatework tool, so a
+// fabric change and a change by another tool exclude each other.
+func Leases(environ map[string]string, home string) (*lease.Manager, error) {
+	dir := nbootstrap.Env{App: "fabric", Environ: environ, Home: home}.SharedDir(nbootstrap.LeaseArea)
+	if dir == "" {
+		return nil, fmt.Errorf("bootstrap: no home directory for the shared lease area")
+	}
+	st, err := filelease.Open(dir)
+	if err != nil {
+		return nil, fmt.Errorf("bootstrap: leases: %w", err)
+	}
+	return lease.NewManager(st, nil), nil
 }

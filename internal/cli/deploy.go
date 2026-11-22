@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/gatework/netops/authz"
 	"github.com/gatework/netops/store"
 	njournal "github.com/gatework/netops/store/journal"
 
@@ -18,6 +19,8 @@ import (
 
 func newDeploy(e env) *cobra.Command {
 	var planDir, confirm, journal string
+	var authzPath string
+	var leaseTTL time.Duration
 	var doApply, save bool
 	var ssh bootstrap.SSH
 	var gf gateFlags
@@ -55,8 +58,14 @@ func newDeploy(e env) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			guard, err := newGuard(e, authzPath)
+			if err != nil {
+				return err
+			}
 			rep := workflow.Deploy(cmd.Context(), workflow.DeployRequest{
 				Bundle: b, Dial: dial, Journal: execs, Save: save, Gate: gf.options(),
+				Authorize: guard.authorize(authz.PermDeploy), Leases: guard.leases,
+				Holder: guard.holder(b.ID), LeaseTTL: leaseTTL,
 			})
 			if _, err := st.WriteJSON(cmd.Context(), "deploy.json", rep); err != nil {
 				return err
@@ -74,6 +83,8 @@ func newDeploy(e env) *cobra.Command {
 	c.Flags().StringVar(&confirm, "confirm", "", "计划 ID；非交互执行时必须提供")
 	c.Flags().BoolVar(&save, "save", false, "验证通过后 copy running-config startup-config")
 	c.Flags().StringVar(&journal, "journal", "executions", "执行记录根目录")
+	c.Flags().StringVar(&authzPath, "authz", "", "权限策略文件（省略表示不做权限检查）")
+	c.Flags().DurationVar(&leaseTTL, "lease-ttl", time.Hour, "设备租约时长；进程异常退出后到期自动释放")
 	_ = c.MarkFlagRequired("plan")
 	sshFlags(c, &ssh)
 	gf.bind(c)
@@ -151,7 +162,7 @@ func printDeploy(e env, rep workflow.DeployReport) {
 }
 
 func newRollback(e env) *cobra.Command {
-	var mgmt, checkpoint, confirm string
+	var mgmt, checkpoint, confirm, authzPath string
 	var ssh bootstrap.SSH
 	c := &cobra.Command{
 		Use:   "rollback",
@@ -172,6 +183,19 @@ func newRollback(e env) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			guard, err := newGuard(e, authzPath)
+			if err != nil {
+				return err
+			}
+			target := bootstrap.Switch(addr)
+			if err := guard.authorize(authz.PermRollback)(target); err != nil {
+				return exit(ExitError, "%s", err)
+			}
+			release, err := guard.hold(cmd.Context(), target, "rollback "+checkpoint)
+			if err != nil {
+				return exit(ExitError, "%s", err)
+			}
+			defer release()
 			res, err := workflow.Rollback(cmd.Context(), dial(addr), checkpoint)
 			if err != nil {
 				return err
@@ -191,6 +215,7 @@ func newRollback(e env) *cobra.Command {
 	c.Flags().StringVar(&mgmt, "switch", "", "交换机管理地址")
 	c.Flags().StringVar(&checkpoint, "checkpoint", "", "checkpoint 名称")
 	c.Flags().StringVar(&confirm, "confirm", "", "checkpoint 名称；非交互执行时必须提供")
+	c.Flags().StringVar(&authzPath, "authz", "", "权限策略文件（省略表示不做权限检查）")
 	_ = c.MarkFlagRequired("switch")
 	_ = c.MarkFlagRequired("checkpoint")
 	sshFlags(c, &ssh)
