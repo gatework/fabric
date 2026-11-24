@@ -69,10 +69,16 @@ func scaleRule() assess.Rule[*device.Switch] {
 		sw := in.Model
 		percent := in.Params.Number("percent")
 		var out []assess.Finding
-		for _, u := range capacity.Compute("", nil, []*device.Switch{sw}, limitsOf(in.Params)).Switches[0].All() {
-			if over(u, percent) {
-				out = append(out, found(switchSubject(sw).Child("scale", u.Name), usageText(u), percent, u.Percent()))
+		c := capacity.Compute("", nil, []*device.Switch{sw}, limitsOf(in.Params)).Switches[0]
+		for _, u := range c.All() {
+			if !over(u, percent) {
+				continue
 			}
+			text := usageText(u)
+			if u == c.Ports && sw.Has(device.DimInterfaces) {
+				text += fmt.Sprintf("：up %d，down 但有描述/路由/聚合的预留口 %d（可核对回收）", c.PortsUp, c.PortsReserved)
+			}
+			out = append(out, found(switchSubject(sw).Child("scale", u.Name), text, percent, u.Percent()))
 		}
 		return out
 	})

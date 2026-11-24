@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"net/netip"
 	"strings"
 	"time"
@@ -363,6 +364,7 @@ func newPortAssign(e env) *cobra.Command {
 	c.Flags().IntVar(&q.MTU, "mtu", 0, "MTU")
 	c.Flags().BoolVar(&q.Edge, "edge", false, "spanning-tree port type edge")
 	c.Flags().StringVar(&q.Description, "description", "", "端口描述")
+	c.Flags().BoolVar(&q.Adopt, "adopt", false, "纳管已接入的端口：允许端口 up 或已学到 MAC（默认拒绝，以免改掉在线服务器的端口）")
 	return c
 }
 
@@ -386,14 +388,14 @@ func newPortFree(e env) *cobra.Command {
 	var intentPath, snapshot, name string
 	c := &cobra.Command{
 		Use:   "free",
-		Short: "列出可分配的空闲端口（未链路 up、无描述的排在前面）",
+		Short: "列出可分配端口：空闲、已接入未纳管（up 或学到 MAC）、有描述的预留口分组显示",
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			in, err := bootstrap.ReadIntent(intentPath)
 			if err != nil {
 				return err
 			}
 			fleet, err := workflow.LoadSnapshot(cmd.Context(), snapshot, in, workflow.LoadOptions{
-				Dimensions: []evidence.Dimension{device.DimConfig, device.DimInterfaces},
+				Dimensions: []evidence.Dimension{device.DimConfig, device.DimInterfaces, device.DimMACs},
 			})
 			if err != nil {
 				return err
@@ -402,10 +404,7 @@ func newPortFree(e env) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			_, _ = fmt.Fprintf(e.stdout, "%s 可分配端口 %d 个：\n", name, len(free))
-			for _, p := range free {
-				_, _ = fmt.Fprintf(e.stdout, "  %-16s %s\n", p.Interface, orDashCLI(p.Status))
-			}
+			printFreePorts(e.stdout, name, free)
 			return nil
 		},
 	}
@@ -423,4 +422,39 @@ func orDashCLI(s string) string {
 		return "-"
 	}
 	return s
+}
+
+// printFreePorts groups the ports nothing configures: quiet ones can be
+// assigned, connected ones need --adopt, described ones are probably
+// reserved.
+func printFreePorts(w io.Writer, name string, free []provision.FreePort) {
+	var quiet, connected, reserved []string
+	for _, p := range free {
+		switch {
+		case p.Status == "up" || p.MACs > 0:
+			s := p.Interface + " " + orDashCLI(p.Status)
+			if p.MACs > 0 {
+				s += fmt.Sprintf("，%d 个 MAC", p.MACs)
+			}
+			connected = append(connected, s)
+		case p.Status == "" || p.Status == "down" || strings.HasPrefix(p.Status, "notconn") || strings.HasPrefix(p.Status, "sfp"):
+			if p.Described {
+				reserved = append(reserved, p.Interface)
+			} else {
+				quiet = append(quiet, p.Interface)
+			}
+		default:
+			reserved = append(reserved, p.Interface+" "+p.Status)
+		}
+	}
+	_, _ = fmt.Fprintf(w, "%s：可直接分配 %d 个，已接入未纳管 %d 个，有描述的预留口 %d 个\n", name, len(quiet), len(connected), len(reserved))
+	if len(quiet) > 0 {
+		_, _ = fmt.Fprintf(w, "  可直接分配：%s\n", strings.Join(quiet, " "))
+	}
+	if len(connected) > 0 {
+		_, _ = fmt.Fprintf(w, "  已接入未纳管（分配需 --adopt，先确认接的是谁：fabric locate）：\n    %s\n", strings.Join(connected, "\n    "))
+	}
+	if len(reserved) > 0 {
+		_, _ = fmt.Fprintf(w, "  有描述但未接入（可能是预留口，分配前核对描述）：%s\n", strings.Join(reserved, " "))
+	}
 }

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Fixed
+
+- `fabric port assign` 不再分配已接入的端口：端口链路 up 或学到 MAC 时拒绝分配，以免把接着未登记服务器的端口改掉。纳管已有服务器的端口要显式加 `--adopt`。新交换机上线时，spine 侧端口同样受此检查。
+- `fabric port free` 原来把 up 的端口也算作可分配；现在分三组显示：可直接分配、已接入未纳管（up 或学到 MAC，需 `--adopt`）、有描述但未接入的预留口。端口按编号自然排序（1/2 排在 1/10 之前）。
+
+### Changed
+
+- `fabric capacity` 把以太网端口占用拆成 up 与预留（down 但有描述、地址或聚合配置），并给出区域的 up、预留、空闲合计；表格按中文字宽对齐。`fabric.switch_scale` 的端口发现同样注明拆分。
+
 ### Changed
 
 - `fabric topology` 默认输出改为拓扑图：两台 spine 为左右母线，每台 VTEP 一行，连线标出两端端口与速率；粗线表示满速，细线表示低速，虚线加 ✗ 表示故障，并标出最低失败层。行尾注明原因、冗余等级与速率不对称，vPC 对用括号标出。`--switch` 以该交换机为根画出邻居树：fabric 互联（OSPF、BGP EVPN 状态）、vPC peer-link、fabric 内其他交换机、CDP 发现的外部设备与管理网。spine 的树会列出仅剩本机一条上行的 VTEP（本机维护前须先恢复）。故障详情改为 `--detail` 显示。`fabric switch show` 使用同一棵邻居树。

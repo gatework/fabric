@@ -269,3 +269,67 @@ func TestRemoveSwitch(t *testing.T) {
 		t.Errorf("result = %+v", res)
 	}
 }
+
+// connected observes DC1-LEF01 with Ethernet1/2 up and learning a MAC, as
+// a switch with an undocumented server on an unconfigured port reports it.
+func connected(t *testing.T, up bool, macs bool) *provision.Observation {
+	t.Helper()
+	sw := nxos.Assemble(t.Context(), device.Identity{Name: "DC1-LEF01"}, map[string]string{})
+	sw.Config = parseLeaf(t)
+	sw.Coverage = sw.Coverage.With(device.DimConfig, evidence.StatusComplete).
+		With(device.DimInterfaces, evidence.StatusComplete).With(device.DimMACs, evidence.StatusComplete)
+	status := "down"
+	if up {
+		status = "up"
+	}
+	sw.State.Interfaces = []device.InterfaceStatus{{Name: "Eth1/2", Up: up, Status: status}}
+	if macs {
+		sw.State.MACs = []device.MACEntry{{VLAN: 100, MAC: "5254.0000.0042", Type: "dynamic", Port: "Eth1/2"}}
+	}
+	return provision.NewObservation([]*device.Switch{sw})
+}
+
+func TestAssignRefusesConnectedPorts(t *testing.T) {
+	t.Parallel()
+	in, _ := setup(t)
+	q := provision.AssignPort{Kind: fabric.AttachPort, Switch: "DC1-LEF01", Interface: "Ethernet1/2", Networks: []fabric.VLAN{100}}
+	for _, tc := range []struct {
+		name     string
+		up, macs bool
+	}{{"link up", true, false}, {"learns MACs", false, true}} {
+		obs := connected(t, tc.up, tc.macs)
+		if _, _, err := provision.Apply(in, q, obs); !errors.Is(err, provision.ErrActive) {
+			t.Errorf("%s: %v", tc.name, err)
+		}
+		adopt := q
+		adopt.Adopt = true
+		if _, _, err := provision.Apply(in, adopt, obs); err != nil {
+			t.Errorf("%s with adopt: %v", tc.name, err)
+		}
+	}
+	if _, _, err := provision.Apply(in, q, connected(t, false, false)); err != nil {
+		t.Errorf("quiet port: %v", err)
+	}
+}
+
+func TestFreePortsReportConnected(t *testing.T) {
+	t.Parallel()
+	in, _ := setup(t)
+	free, err := provision.Free(in, connected(t, true, true), "DC1-LEF01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(free, func(p provision.FreePort) bool { return p.Interface == "Ethernet1/2" })
+	if i < 0 || free[i].Status != "up" || free[i].MACs != 1 {
+		t.Fatalf("free = %+v", free)
+	}
+}
+
+func TestComparePortsIsNatural(t *testing.T) {
+	t.Parallel()
+	ports := []string{"Ethernet1/10", "Ethernet1/2", "Ethernet1/1", "port-channel10", "Ethernet1/9"}
+	slices.SortFunc(ports, device.ComparePorts)
+	if want := []string{"Ethernet1/1", "Ethernet1/2", "Ethernet1/9", "Ethernet1/10", "port-channel10"}; !slices.Equal(ports, want) {
+		t.Errorf("sorted = %v", ports)
+	}
+}

@@ -46,6 +46,11 @@ type Switch struct {
 	MACs         Usage  `json:"macs"`
 	NVEPeers     Usage  `json:"nve_peers"`
 	PortChannels Usage  `json:"port_channels"`
+	// PortsUp and PortsReserved split the used Ethernet ports: up, or
+	// down but described, routed or bundled. Reserved ports are the
+	// first to reclaim when the switch runs out.
+	PortsUp       int `json:"ports_up"`
+	PortsReserved int `json:"ports_reserved"`
 }
 
 // All returns the switch's measures.
@@ -76,10 +81,6 @@ func scale(sw *device.Switch, lim Limits) Switch {
 	s := Switch{Name: sw.Name}
 	cfg := sw.Config
 	s.VLANs = Usage{Name: "VLAN", Used: len(cfg.VLANs), Total: lim.VLANs}
-	up := map[string]bool{}
-	for _, st := range sw.State.Interfaces {
-		up[st.Name] = st.Up
-	}
 	eth, used, pcs := 0, 0, 0
 	for name, i := range cfg.Interfaces {
 		switch i.Kind {
@@ -87,8 +88,14 @@ func scale(sw *device.Switch, lim Limits) Switch {
 			eth++
 			// A port is taken when it is up, described, bundled or routed:
 			// the same test as assigning a free port.
-			if up[name] || i.Description != "" || len(i.Addresses) > 0 || i.ChannelGroup != 0 {
+			st, _ := sw.State.Port(name)
+			switch {
+			case st.Up:
 				used++
+				s.PortsUp++
+			case i.Description != "" || len(i.Addresses) > 0 || i.ChannelGroup != 0:
+				used++
+				s.PortsReserved++
 			}
 		case device.KindPortChannel:
 			pcs++
