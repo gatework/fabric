@@ -32,4 +32,13 @@ On the 2026-11-13 corpus:
 - SHA2-LEF15 is risky: 85 dual-homed MACs move to SHA2-LEF16, whose uplinks and vPC are healthy.
 - SHA2-BDR02 is risky: 21 single-homed endpoints on 16 ports, including NAS and iDRAC ports, with their descriptions and IPs.
 
-North–south impact on borders (VRF peerings to the WAN or firewalls) is not assessed, because the IPv4 BGP and static routes are not collected yet.
+## Amendment: border north–south (2026-11-24)
+
+A border's VRF static routes are its exits from the fabric. For each exit, the other borders of the region with the same VRF route are classified by how they leave the fabric without this switch:
+- **Own**: a FULL OSPF neighbor outside the underlay process that is not this switch. This is a valid backup.
+- **Standby**: an external routed port of their own that is up and runs OSPF, but has no neighbor. This is typically the standby unit of a firewall pair, so it is risky, and the report asks to confirm the failover.
+- **Through**: no other way out than this switch. This blocks maintenance.
+
+OSPF adjacencies outside the underlay are listed. On the 2026-11-13 corpus, all four regions use the standby pattern: BDR01 peers with the active firewall, while BDR02's link to the other firewall is up without OSPF. Maintaining BDR01 therefore relies on a firewall failover.
+
+Routes learned by BGP in VRFs (IPv4 unicast) are not collected and stay unassessed.

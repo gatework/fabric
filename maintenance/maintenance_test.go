@@ -3,6 +3,7 @@ package maintenance_test
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"slices"
 	"testing"
 
@@ -121,4 +122,73 @@ func ExampleAssess() {
 	rep, _ := maintenance.Assess(r, a, sws, "SPN1")
 	fmt.Println(rep.Verdict, rep.Isolated)
 	// Output: 不可维护 [L1]
+}
+
+// borders builds two borders with the same VRF default route. B1 peers
+// with the core over Ethernet1/54. B2 has, as configured by kind, its own
+// core adjacency, an external link up without adjacency, or no external
+// link at all (its only peer outside the underlay is B1).
+func borders(kind string) (*fabric.Region, topology.Audit, []*device.Switch) {
+	r := &fabric.Region{Name: "r", Underlay: &fabric.Underlay{OSPFProcess: "10"}, Switches: []*fabric.Switch{
+		{Name: "B1", Role: fabric.RoleBorder, RouterID: fabric.Addr{Addr: netip.MustParseAddr("10.0.0.1")}},
+		{Name: "B2", Role: fabric.RoleBorder, RouterID: fabric.Addr{Addr: netip.MustParseAddr("10.0.0.2")}},
+	}}
+	route := map[string]device.VRF{"VXLAN": {VNI: 20000, Routes: []device.StaticRoute{{Prefix: netip.MustParsePrefix("0.0.0.0/0"), NextHop: "192.0.2.1", NextHopVRF: "default"}}}}
+	mk := func(name string, neighbors []device.OSPFNeighbor, ifs map[string]device.Interface, ports []device.InterfaceStatus) *device.Switch {
+		sw := &device.Switch{Identity: device.Identity{Name: name, Role: fabric.RoleBorder}}
+		sw.Config = &device.Config{VRFs: route, Interfaces: ifs}
+		sw.State.OSPF, sw.State.Interfaces = neighbors, ports
+		for _, d := range []evidence.Dimension{device.DimConfig, device.DimOSPF, device.DimInterfaces, device.DimMACs} {
+			sw.Coverage = sw.Coverage.With(d, evidence.StatusComplete)
+		}
+		return sw
+	}
+	core := device.OSPFNeighbor{Process: "1", RouterID: "198.51.100.1", Interface: "Eth1/54", Full: true}
+	b1 := mk("B1", []device.OSPFNeighbor{core, {Process: "1", RouterID: "10.0.0.2", Interface: "Po10", Full: true}}, nil, nil)
+	toB1 := device.OSPFNeighbor{Process: "1", RouterID: "10.0.0.1", Interface: "Po10", Full: true}
+	var b2 *device.Switch
+	switch kind {
+	case "own":
+		b2 = mk("B2", []device.OSPFNeighbor{toB1, core}, nil, nil)
+	case "standby":
+		ifs := map[string]device.Interface{"Ethernet1/54": {Name: "Ethernet1/54", Kind: device.KindEthernet,
+			Addresses: []netip.Prefix{netip.MustParsePrefix("192.0.2.6/30")}, OSPF: &device.InterfaceOSPF{Process: "1", Area: "0"}}}
+		b2 = mk("B2", []device.OSPFNeighbor{toB1}, ifs, []device.InterfaceStatus{{Name: "Eth1/54", Up: true, Status: "up"}})
+	default:
+		b2 = mk("B2", []device.OSPFNeighbor{toB1}, nil, nil)
+	}
+	return r, topology.Audit{Region: "r"}, []*device.Switch{b1, b2}
+}
+
+func TestBorderExitBackups(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		kind string
+		want maintenance.Verdict
+	}{{"own", maintenance.VerdictRisky}, {"standby", maintenance.VerdictRisky}, {"through", maintenance.VerdictBlocked}} {
+		r, a, sws := borders(tc.kind)
+		rep, err := maintenance.Assess(r, a, sws, "B1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rep.Verdict != tc.want || len(rep.Exits) != 1 {
+			t.Errorf("%s: verdict %s, exits %+v, blockers %v, risks %v", tc.kind, rep.Verdict, rep.Exits, rep.Blockers, rep.Risks)
+			continue
+		}
+		e := rep.Exits[0]
+		switch tc.kind {
+		case "own":
+			if !slices.Equal(e.Also, []string{"B2"}) {
+				t.Errorf("own: %+v", e)
+			}
+		case "standby":
+			if !slices.Equal(e.Standby, []string{"B2"}) {
+				t.Errorf("standby: %+v", e)
+			}
+		default:
+			if !slices.Equal(e.Through, []string{"B2"}) {
+				t.Errorf("through: %+v", e)
+			}
+		}
+	}
 }

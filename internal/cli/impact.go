@@ -99,6 +99,28 @@ func printImpact(w io.Writer, r maintenance.Report, verbose bool) {
 			_ = term.Printf(w, "  双归终端：%d 个 vPC 端口、%d 个 MAC 由 %s 接管（-v 列出）\n", len(r.DualHomed), dual, r.Peer)
 		}
 	}
+	if len(r.Exits) > 0 {
+		_ = term.Printf(w, "  南北向出口路由（VRF 静态路由）：\n")
+		for _, x := range r.Exits {
+			via := x.NextHop
+			if x.NextHopVRF != "" {
+				via += "（VRF " + x.NextHopVRF + "）"
+			}
+			also := "只在本机"
+			switch {
+			case len(x.Also) > 0:
+				also = "同时在 " + strings.Join(x.Also, "、")
+			case len(x.Standby) > 0:
+				also = "⚠ " + strings.Join(x.Standby, "、") + " 也有此路由，外部链路 up 但当前无 OSPF 邻接（备用防火墙？）"
+			case len(x.Through) > 0:
+				also = "✗ " + strings.Join(x.Through, "、") + " 也有此路由，但其外部出口经过本机"
+			}
+			_ = term.Printf(w, "    VRF %s %s → %s  %s\n", x.VRF, x.Prefix, via, also)
+		}
+	}
+	if len(r.Peerings) > 0 {
+		_ = term.Printf(w, "  fabric 外的 OSPF 邻接：%s\n", strings.Join(r.Peerings, "；"))
+	}
 	if len(r.External) > 0 {
 		_ = term.Printf(w, "  外部设备（CDP）：\n")
 		for _, n := range r.External {
