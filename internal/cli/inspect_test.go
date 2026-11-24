@@ -91,3 +91,15 @@ func TestTopologyDrawsTheFabric(t *testing.T) {
 		t.Errorf("switch tree:\n%s", out)
 	}
 }
+
+func TestImpactJudgesMaintenance(t *testing.T) {
+	t.Parallel()
+	snap := snapshotDir(t)
+	code, out, errb := runCLI(t, "impact", "DC1-LEF01", "--snapshot", snap, "--intent", testIntent)
+	if !strings.Contains(out, "维护影响评估") || code == ExitError {
+		t.Errorf("impact: code %d\n%s\n%s", code, out, errb)
+	}
+	if code, _, errb := runCLI(t, "impact", "NO-SUCH", "--snapshot", snap, "--intent", testIntent); code != ExitError || !strings.Contains(errb, "Tab") {
+		t.Errorf("unknown switch: code %d %s", code, errb)
+	}
+}

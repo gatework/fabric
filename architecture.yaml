@@ -12,6 +12,7 @@ declared:
   - ./status
   - ./endpoint
   - ./topology
+  - ./maintenance
   - ./capacity
   - ./governance
   - ./provision
@@ -31,7 +32,7 @@ declared:
 
 rules:
   - name: domain packages stay free of I/O
-    packages: [., ./device, ./plan, ./baseline, ./adopt, ./check, ./rollout, ./report, ./numbering, ./provision, ./status, ./endpoint, ./topology, ./capacity, ./governance, ./vendors/...]
+    packages: [., ./device, ./plan, ./baseline, ./adopt, ./check, ./rollout, ./report, ./numbering, ./provision, ./status, ./endpoint, ./topology, ./maintenance, ./capacity, ./governance, ./vendors/...]
     deny: [os, os/exec, io/fs, net, net/http, database/sql, path/filepath, syscall,
            github.com/gatework/net-connector/..., github.com/gatework/go-expect/...]
 
@@ -70,6 +71,10 @@ rules:
   - name: views of the observed fabric depend on the models only
     packages: [./status, ./endpoint, ./topology, ./capacity]
     only_local: [., ./device]
+
+  - name: maintenance impact reads the topology audit and the observed switches
+    packages: [./maintenance]
+    only_local: [., ./device, ./topology]
 
   - name: checks assess observation against intent and baseline
     packages: [./check]
