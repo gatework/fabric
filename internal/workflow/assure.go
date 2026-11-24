@@ -3,6 +3,7 @@ package workflow
 import (
 	"cmp"
 	"context"
+	"fmt"
 	"slices"
 
 	"github.com/gatework/netops/assess"
@@ -12,6 +13,7 @@ import (
 	"github.com/gatework/fabric/check"
 	"github.com/gatework/fabric/device"
 	"github.com/gatework/fabric/endpoint"
+	"github.com/gatework/fabric/maintenance"
 	"github.com/gatework/fabric/status"
 	"github.com/gatework/fabric/topology"
 )
@@ -192,4 +194,24 @@ func Names(s assess.Subject, name string) bool {
 		}
 	}
 	return false
+}
+
+// Maintenance assesses what breaks while one switch is out of service.
+func Maintenance(f *Fleet, name string) (maintenance.Report, error) {
+	sw, err := f.Switch(name)
+	if err != nil {
+		return maintenance.Report{}, err
+	}
+	if f.Intent == nil {
+		return maintenance.Report{}, fmt.Errorf("workflow: maintenance needs the intent")
+	}
+	r, ok := f.Intent.Region(sw.Region)
+	if !ok {
+		return maintenance.Report{}, fmt.Errorf("workflow: no region %q", sw.Region)
+	}
+	audits := Topology(f, sw.Region)
+	if len(audits) == 0 {
+		return maintenance.Report{}, fmt.Errorf("workflow: no topology for %q", sw.Region)
+	}
+	return maintenance.Assess(r, audits[0], f.Members(sw.Region), name)
 }
