@@ -103,3 +103,12 @@ func TestImpactJudgesMaintenance(t *testing.T) {
 		t.Errorf("unknown switch: code %d %s", code, errb)
 	}
 }
+
+func TestPathReportsUnlearnedEndpoints(t *testing.T) {
+	t.Parallel()
+	snap := snapshotDir(t)
+	code, _, errb := runCLI(t, "path", "5254.dead.beef", "10.0.0.1", "--snapshot", snap, "--intent", testIntent)
+	if code != ExitFindings || !strings.Contains(errb, "fabric locate") {
+		t.Errorf("unlearned endpoint: code %d %s", code, errb)
+	}
+}

@@ -4,6 +4,11 @@
 
 ### Added
 
+- `fabric path <源> <目的>`：两个终端（MAC 或 IP）之间的路径追踪（ADR 0014）。
+  - 判断转发模式：二层桥接（同一 L2VNI）、三层路由（同一 VRF，经 anycast 网关与 L3VNI）或跨 VRF。
+  - 双向逐跳验证：接入端口与 VLAN 放行、L2VNI、网关 SVI、L3VNI、入口 VTEP 的 EVPN 路由及下一跳、NVE 对端、两端上行与 ECMP、目的端口。
+  - 指出第一个断点并给出建议；只有路径完整时退出码为 0。
+
 - `fabric impact <交换机>`：维护影响评估，回答该交换机重启、升级或下线期间会断什么（ADR 0013）。
   - spine：列出只剩本机一条健康上行的 VTEP（会失联）、EVPN 会话只建在本机上的 VTEP，以及会失去冗余的 VTEP。
   - leaf / border：本机学到的终端按端口归并，附描述、VLAN 和 IP，分为单归（会中断）与 vPC 双归（由对端接管）；同时检查 vPC 对端能否独自承载（上行冗余、peer、keepalive、一致性、对应 vPC 是否 up）；外部设备单独列出。

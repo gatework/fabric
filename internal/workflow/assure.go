@@ -14,6 +14,7 @@ import (
 	"github.com/gatework/fabric/device"
 	"github.com/gatework/fabric/endpoint"
 	"github.com/gatework/fabric/maintenance"
+	"github.com/gatework/fabric/reach"
 	"github.com/gatework/fabric/status"
 	"github.com/gatework/fabric/topology"
 )
@@ -214,4 +215,13 @@ func Maintenance(f *Fleet, name string) (maintenance.Report, error) {
 		return maintenance.Report{}, fmt.Errorf("workflow: no topology for %q", sw.Region)
 	}
 	return maintenance.Assess(r, audits[0], f.Members(sw.Region), name)
+}
+
+// Trace verifies the forwarding path between two endpoints.
+func Trace(f *Fleet, from, to string) (reach.Trace, error) {
+	var audits []topology.Audit
+	for _, name := range f.Regions() {
+		audits = append(audits, Topology(f, name)...)
+	}
+	return reach.Fabric{Index: Endpoints(f), Switches: f.Switches, Audits: audits}.Trace(from, to)
 }
