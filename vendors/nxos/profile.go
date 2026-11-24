@@ -41,6 +41,17 @@ func Probes() []Probe {
 	}
 }
 
+// RawCaptures are commands collected verbatim after every probe, for
+// views not modeled yet: the VRF IPv4 BGP sessions and route tables that
+// north–south assessment of borders needs (ADR 0013). Nothing parses
+// them; a device rejecting one loses only that output.
+func RawCaptures() []string {
+	return []string{
+		"show bgp ipv4 unicast summary vrf all",
+		"show ip route summary vrf all",
+	}
+}
+
 // Profile resolves NX-OS commands for dimensions. It satisfies
 // assess.VerifyCommands.
 type Profile struct{}

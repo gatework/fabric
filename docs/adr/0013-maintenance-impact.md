@@ -41,4 +41,4 @@ A border's VRF static routes are its exits from the fabric. For each exit, the o
 
 OSPF adjacencies outside the underlay are listed. On the 2026-11-13 corpus, all four regions use the standby pattern: BDR01 peers with the active firewall, while BDR02's link to the other firewall is up without OSPF. Maintaining BDR01 therefore relies on a firewall failover.
 
-Routes learned by BGP in VRFs (IPv4 unicast) are not collected and stay unassessed.
+Routes learned by BGP in VRFs (IPv4 unicast) stay unassessed. To get real data for that, `collect` now saves `show bgp ipv4 unicast summary vrf all` and `show ip route summary vrf all` verbatim after every probe, best effort, and nothing parses them yet. The parsers will be written against those captures, not against assumed output.

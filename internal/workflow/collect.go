@@ -73,10 +73,11 @@ func collectOne(ctx context.Context, req CollectRequest, addr netip.Addr) Collec
 	if err != nil {
 		res.Error = code(err)
 	}
-	commands := make([]string, 0, len(nxos.Probes()))
+	commands := make([]string, 0, len(nxos.Probes())+len(nxos.RawCaptures()))
 	for _, p := range nxos.Probes() {
 		commands = append(commands, p.Command)
 	}
+	commands = append(commands, nxos.RawCaptures()...)
 	files, encErr := snapshot.Encode(addr.String(), commands, outs, "", req.Now())
 	if encErr != nil {
 		res.Error = encErr.Error()
