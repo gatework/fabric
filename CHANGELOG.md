@@ -4,6 +4,11 @@
 
 ### Added
 
+- `fabric diff --from <旧快照>`：两次采集之间的变化（ADR 0015）。
+  - 逐台交换机按配置块对比运行配置，ACL 条目顺序敏感；密码、community 等敏感内容已遮蔽，密钥变化单独标为“已更改”。
+  - 两份快照都采集了运行状态时，再比较端口 up/down、OSPF FULL、BGP EVPN、NVE 对端的丢失与新增，以及本地终端的迁移、出现与消失。
+  - 有丢失项的交换机排在最前；`--switch`、`-v` 显示明细。
+
 - `fabric path <源> <目的>`：两个终端（MAC 或 IP）之间的路径追踪（ADR 0014）。
   - 判断转发模式：二层桥接（同一 L2VNI）、三层路由（同一 VRF，经 anycast 网关与 L3VNI）或跨 VRF。
   - 双向逐跳验证：接入端口与 VLAN 放行、L2VNI、网关 SVI、L3VNI、入口 VTEP 的 EVPN 路由及下一跳、NVE 对端、两端上行与 ECMP、目的端口。

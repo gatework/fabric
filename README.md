@@ -8,6 +8,7 @@
 |---|---|---|
 | 采集 | `fabric collect` | 每台交换机一个目录：running-config 与 11 个 show 命令的原始回显（与现有快照格式兼容） |
 | 交换机详情 | `fabric switch show <名称>` | 健康评分、上行/下联与互联明细、OSPF 与 BGP EVPN 会话（按对端名称）、NVE、vPC、聚合、本机发现；长表只列异常，`-v` 显示全部 |
+| 变更对比 | `fabric diff --from <旧快照>` | 两次采集之间变了什么：逐台配置变更（按配置块，敏感值遮蔽）与运行状态变化（端口、OSPF、BGP EVPN、NVE、终端迁移） |
 | 路径追踪 | `fabric path <源> <目的>` | 两个终端（MAC/IP）间的转发路径：二层桥接 / 三层路由 / 跨 VRF；双向逐跳验证端口、VNI、网关、EVPN 路由与下一跳、NVE 对端、ECMP，指出断点 |
 | 维护影响 | `fabric impact <名称>` | 重启/升级/下线前评估：spine 会让哪些 VTEP 失联或失去 EVPN 会话；leaf 的单归终端（端口、描述、IP）与由 vPC 对端接管的双归终端，对端能否承载；结论与维护前步骤 |
 | 拓扑 | `fabric topology` | spine–VTEP 拓扑图：两端端口、速率、故障层与原因、冗余与速率对称、vPC 对；`--switch` 画单机邻居树（fabric 互联、vPC peer-link、外部设备、管理网）；`--detail` 列故障两端详情、原因与处置建议；每条互联按 物理 → CDP → 配置 → OSPF 逐层验证 |

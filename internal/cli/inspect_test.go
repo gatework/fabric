@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"os"
 	"strings"
 	"testing"
 )
@@ -110,5 +111,28 @@ func TestPathReportsUnlearnedEndpoints(t *testing.T) {
 	code, _, errb := runCLI(t, "path", "5254.dead.beef", "10.0.0.1", "--snapshot", snap, "--intent", testIntent)
 	if code != ExitFindings || !strings.Contains(errb, "fabric locate") {
 		t.Errorf("unlearned endpoint: code %d %s", code, errb)
+	}
+}
+
+func TestDiffReportsConfigurationChanges(t *testing.T) {
+	t.Parallel()
+	before, after := snapshotDir(t), snapshotDir(t)
+	path := after + "/198.51.100.11/03-show-running-config.output"
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(body, []byte("\nntp server 192.0.2.123 use-vrf management\nsnmp-server community s3cret group network-operator\n")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errb := runCLI(t, "diff", "--from", before, "--snapshot", after, "--intent", testIntent, "-v")
+	if code != ExitFindings || !strings.Contains(out, "+ ntp server 192.0.2.123") || !strings.Contains(out, "配置变化 1 台") {
+		t.Fatalf("diff: code %d\n%s\n%s", code, out, errb)
+	}
+	if strings.Contains(out, "s3cret") {
+		t.Errorf("diff leaked a community:\n%s", out)
+	}
+	if code, out, _ := runCLI(t, "diff", "--from", before, "--snapshot", before, "--intent", testIntent); code != ExitOK || !strings.Contains(out, "没有变化") {
+		t.Errorf("identical snapshots: code %d\n%s", code, out)
 	}
 }
