@@ -56,6 +56,32 @@ func portFree(r *fabric.Region, obs *Observation, sw, port string) error {
 	}
 }
 
+// portActive rejects a port the switch reports in use although nothing
+// configures it: the link is up or MAC addresses are learned on it. Such a
+// port usually carries an undocumented server; reassigning it would cut
+// that server off. Without interface or MAC evidence the port is not
+// judged.
+func portActive(obs *Observation, sw, port string) error {
+	if obs == nil {
+		return nil
+	}
+	s, ok := obs.byName[sw]
+	if !ok {
+		return nil
+	}
+	if s.Has(device.DimInterfaces) {
+		if st, ok := s.State.Port(port); ok && st.Up {
+			return fmt.Errorf("%w: %s %s is up (something is connected); use --adopt to take over a connected port", ErrActive, sw, port)
+		}
+	}
+	if s.Has(device.DimMACs) {
+		if n := s.State.LearnedOn(port); n > 0 {
+			return fmt.Errorf("%w: %s %s has %d learned MAC addresses; use --adopt to take over a connected port", ErrActive, sw, port, n)
+		}
+	}
+	return nil
+}
+
 func portChannelPool(r *fabric.Region) *set.Set[uint16] {
 	if r.Underlay != nil && r.Underlay.Pools.PortChannels != nil {
 		return r.Underlay.Pools.PortChannels
@@ -124,6 +150,9 @@ type AssignPort struct {
 	Networks    []fabric.VLAN
 	MTU         int
 	Edge        bool
+	// Adopt takes over ports that are up or learn MAC addresses: bringing
+	// an existing, connected server under the intent.
+	Adopt bool
 }
 
 // Apply validates, allocates and assigns.
@@ -168,7 +197,7 @@ func (q AssignPort) ports(r *fabric.Region, obs *Observation, a *fabric.Attachme
 	case fabric.AttachPort:
 		port, _ := device.CanonicalInterface(q.Interface)
 		a.Interface = port
-		return portFree(r, obs, q.Switch, port)
+		return q.assignable(r, obs, q.Switch, port)
 	case fabric.AttachPortChannel:
 		if len(q.Members) != 1 || len(q.Members[q.Switch]) == 0 {
 			return fmt.Errorf("%w: a port-channel needs members on %s only", ErrConflict, q.Switch)
@@ -192,7 +221,7 @@ func (q AssignPort) ports(r *fabric.Region, obs *Observation, a *fabric.Attachme
 	for _, sw := range slices.Sorted(maps.Keys(q.Members)) {
 		for _, m := range q.Members[sw] {
 			port, _ := device.CanonicalInterface(m)
-			if err := portFree(r, obs, sw, port); err != nil {
+			if err := q.assignable(r, obs, sw, port); err != nil {
 				return err
 			}
 			a.Members[sw] = append(a.Members[sw], port)
@@ -271,6 +300,11 @@ func (q ReleasePort) Apply(in *fabric.Intent, _ *Observation) (Result, error) {
 type FreePort struct {
 	Interface string `json:"interface"`
 	Status    string `json:"status"`
+	// MACs counts addresses learned on the port: a port that learns is
+	// connected even when nothing configures it.
+	MACs int `json:"macs,omitempty"`
+	// Described is set when the port has a description.
+	Described bool `json:"described,omitempty"`
 }
 
 // Free lists the switch's Ethernet ports that nothing uses, with their
@@ -285,22 +319,33 @@ func Free(in *fabric.Intent, obs *Observation, name string) ([]FreePort, error) 
 		return nil, fmt.Errorf("%w: no observation of %s", ErrNotFound, name)
 	}
 	st, _ := obs.state(name)
-	status := map[string]string{}
-	for _, i := range st.Interfaces {
-		status[i.Name] = i.Status
-	}
 	var quiet, busy []FreePort
-	for _, port := range slices.Sorted(maps.Keys(cfg.Interfaces)) {
+	for _, port := range slices.SortedFunc(maps.Keys(cfg.Interfaces), device.ComparePorts) {
 		i := cfg.Interfaces[port]
 		if i.Kind != device.KindEthernet || strings.Contains(port, ".") || portFree(r, obs, name, port) != nil {
 			continue
 		}
-		fp := FreePort{Interface: port, Status: status[port]}
-		if fp.Status == "up" || i.Description != "" {
+		fp := FreePort{Interface: port, MACs: st.LearnedOn(port), Described: i.Description != ""}
+		if p, ok := st.Port(port); ok {
+			fp.Status = p.Status
+		}
+		if fp.Status == "up" || fp.MACs > 0 || i.Description != "" {
 			busy = append(busy, fp)
 		} else {
 			quiet = append(quiet, fp)
 		}
 	}
 	return append(quiet, busy...), nil
+}
+
+// assignable is portFree plus, unless the operator adopts a connected
+// port, portActive.
+func (q AssignPort) assignable(r *fabric.Region, obs *Observation, sw, port string) error {
+	if err := portFree(r, obs, sw, port); err != nil {
+		return err
+	}
+	if q.Adopt {
+		return nil
+	}
+	return portActive(obs, sw, port)
 }

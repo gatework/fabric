@@ -231,15 +231,33 @@ func peak(s capacity.Switch) float64 {
 func printCapacity(e env, regions []capacity.Region, top int) {
 	w := e.stdout
 	for _, r := range regions {
-		_, _ = fmt.Fprintf(w, "区域 %s\n", r.Name)
-		for _, u := range r.Pools {
-			_, _ = fmt.Fprintf(w, "  %-28s %s\n", u.Name, pct(u))
+		var eth, up, reserved int
+		for _, s := range r.Switches {
+			eth += s.Ports.Total
+			up += s.PortsUp
+			reserved += s.PortsReserved
 		}
+		_ = term.Printf(w, "区域 %s：以太网端口 %d 个，up %d，down 但已预留（有描述/路由/聚合）%d，空闲 %d\n", r.Name, eth, up, reserved, eth-up-reserved)
+		pools := term.NewTable("资源池", "已用/总量")
+		for _, u := range r.Pools {
+			pools.Add(u.Name, pct(u))
+		}
+		renderIndented(w, pools, "  ")
 		sw := slices.Clone(r.Switches)
 		slices.SortFunc(sw, func(a, b capacity.Switch) int { return cmp.Compare(peak(b), peak(a)) })
-		_, _ = fmt.Fprintf(w, "  利用率最高的交换机：\n  %-18s %-16s %-16s %-18s %-14s %s\n", "交换机", "VLAN", "以太网端口", "MAC 表", "NVE 对端", "port-channel")
-		for _, s := range sw[:min(top, len(sw))] {
-			_, _ = fmt.Fprintf(w, "  %-18s %-16s %-16s %-18s %-14s %s\n", s.Name, pct(s.VLANs), pct(s.Ports), pct(s.MACs), pct(s.NVEPeers), pct(s.PortChannels))
+		t := term.NewTable("交换机", "VLAN", "以太网端口", "其中 up/预留", "MAC 表", "NVE 对端", "port-channel")
+		for _, s := range sw {
+			t.Add(s.Name, pct(s.VLANs), pct(s.Ports), fmt.Sprintf("%d/%d", s.PortsUp, s.PortsReserved), pct(s.MACs), pct(s.NVEPeers), pct(s.PortChannels))
+		}
+		_ = term.Printf(w, "  利用率最高的交换机：\n")
+		var b strings.Builder
+		omitted, _ := t.Render(&b, top)
+		for line := range strings.SplitSeq(strings.TrimRight(b.String(), "\n"), "\n") {
+			_ = term.Printf(w, "  %s\n", line)
+		}
+		if omitted > 0 {
+			_ = term.Printf(w, "  … 另有 %d 台，--top 调整数量\n", omitted)
 		}
 	}
+	_ = term.Printf(w, "\n预留口是 down 但带描述、地址或聚合配置的端口：端口紧张时优先核对并回收（fabric port free --switch <名称>）。\n")
 }

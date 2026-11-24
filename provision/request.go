@@ -15,6 +15,9 @@ var (
 	ErrNotFound = errors.New("provision: not found")
 	ErrConflict = errors.New("provision: conflict")
 	ErrInUse    = errors.New("provision: in use")
+	// ErrActive reports a port that nothing configures but that is in
+	// use on the switch: its link is up or it learns MAC addresses.
+	ErrActive   = errors.New("provision: port active")
 	ErrUnderlay = errors.New("provision: region does not manage its underlay")
 )
 

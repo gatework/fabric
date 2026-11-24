@@ -120,7 +120,7 @@ func neighbors(r *fabric.Region, switches []*device.Switch, links []LinkCheck, e
 		}
 	}
 	slices.SortFunc(out, func(x, y Neighbor) int {
-		return cmp.Or(cmp.Compare(x.Switch, y.Switch), cmp.Compare(x.Kind, y.Kind), comparePorts(x.Port, y.Port))
+		return cmp.Or(cmp.Compare(x.Switch, y.Switch), cmp.Compare(x.Kind, y.Kind), device.ComparePorts(x.Port, y.Port))
 	})
 	return out
 }
@@ -143,37 +143,6 @@ func membership(sw *device.Switch) (map[string]string, string) {
 		}
 	}
 	return out, peer
-}
-
-// comparePorts orders "Ethernet1/9" before "Ethernet1/10".
-func comparePorts(a, b string) int {
-	pa, pb := portNumbers(a), portNumbers(b)
-	if c := cmp.Compare(strings.TrimRight(a, "0123456789/"), strings.TrimRight(b, "0123456789/")); c != 0 && (len(pa) == 0 || len(pb) == 0) {
-		return c
-	}
-	if c := slices.Compare(pa, pb); c != 0 {
-		return c
-	}
-	return cmp.Compare(a, b)
-}
-
-func portNumbers(s string) []int {
-	var out []int
-	n, in := 0, false
-	for _, r := range s {
-		if r >= '0' && r <= '9' {
-			n, in = n*10+int(r-'0'), true
-			continue
-		}
-		if in {
-			out = append(out, n)
-		}
-		n, in = 0, false
-	}
-	if in {
-		out = append(out, n)
-	}
-	return out
 }
 
 // sessions finds each VTEP's BGP EVPN session to every spine by the

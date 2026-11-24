@@ -181,3 +181,30 @@ type CDPNeighbor struct {
 	Address     string `json:"address,omitempty"`
 	MgmtAddress string `json:"mgmt_address,omitempty"`
 }
+
+// Port returns the "show interface brief" row of a port by any spelling
+// of its name ("Eth1/1" and "Ethernet1/1" are the same port).
+func (s State) Port(name string) (InterfaceStatus, bool) {
+	want, _ := CanonicalInterface(name)
+	for _, p := range s.Interfaces {
+		if got, _ := CanonicalInterface(p.Name); got == want {
+			return p, true
+		}
+	}
+	return InterfaceStatus{}, false
+}
+
+// LearnedOn counts the MAC addresses learned locally on a port.
+func (s State) LearnedOn(name string) int {
+	want, _ := CanonicalInterface(name)
+	n := 0
+	for _, m := range s.MACs {
+		if m.RemoteVTEP != "" {
+			continue
+		}
+		if got, _ := CanonicalInterface(m.Port); got == want {
+			n++
+		}
+	}
+	return n
+}

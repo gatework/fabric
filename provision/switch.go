@@ -150,6 +150,9 @@ func (q AddSwitch) uplinks(r *fabric.Region, obs *Observation, used []netip.Addr
 		if err := portFree(r, obs, u.Remote, port); err != nil {
 			return err
 		}
+		if err := portActive(obs, u.Remote, port); err != nil {
+			return err
+		}
 		sub, err := links.Subnet(r.Underlay.LinkPrefix)
 		if err != nil {
 			return err

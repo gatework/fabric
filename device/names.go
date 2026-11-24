@@ -1,6 +1,8 @@
 package device
 
 import (
+	"cmp"
+	"slices"
 	"strings"
 )
 
@@ -36,4 +38,36 @@ func CanonicalInterface(name string) (string, InterfaceKind) {
 		return p.long + rest, p.kind
 	}
 	return name, KindOther
+}
+
+// ComparePorts orders interface names naturally: "Ethernet1/9" before
+// "Ethernet1/10", and by name for different kinds.
+func ComparePorts(a, b string) int {
+	pa, pb := portNumbers(a), portNumbers(b)
+	if c := cmp.Compare(strings.TrimRight(a, "0123456789/"), strings.TrimRight(b, "0123456789/")); c != 0 && (len(pa) == 0 || len(pb) == 0) {
+		return c
+	}
+	if c := slices.Compare(pa, pb); c != 0 {
+		return c
+	}
+	return cmp.Compare(a, b)
+}
+
+func portNumbers(s string) []int {
+	var out []int
+	n, in := 0, false
+	for _, r := range s {
+		if r >= '0' && r <= '9' {
+			n, in = n*10+int(r-'0'), true
+			continue
+		}
+		if in {
+			out = append(out, n)
+		}
+		n, in = 0, false
+	}
+	if in {
+		out = append(out, n)
+	}
+	return out
 }
