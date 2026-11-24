@@ -14,6 +14,7 @@ declared:
   - ./topology
   - ./maintenance
   - ./reach
+  - ./delta
   - ./capacity
   - ./governance
   - ./provision
@@ -33,7 +34,7 @@ declared:
 
 rules:
   - name: domain packages stay free of I/O
-    packages: [., ./device, ./plan, ./baseline, ./adopt, ./check, ./rollout, ./report, ./numbering, ./provision, ./status, ./endpoint, ./topology, ./maintenance, ./reach, ./capacity, ./governance, ./vendors/...]
+    packages: [., ./device, ./plan, ./baseline, ./adopt, ./check, ./rollout, ./report, ./numbering, ./provision, ./status, ./endpoint, ./topology, ./maintenance, ./reach, ./delta, ./capacity, ./governance, ./vendors/...]
     deny: [os, os/exec, io/fs, net, net/http, database/sql, path/filepath, syscall,
            github.com/gatework/net-connector/..., github.com/gatework/go-expect/...]
 
@@ -80,6 +81,10 @@ rules:
   - name: path traces read endpoints, the topology audit and the observed switches
     packages: [./reach]
     only_local: [., ./device, ./endpoint, ./topology]
+
+  - name: collection comparisons read the observed model only
+    packages: [./delta]
+    only_local: [., ./device]
 
   - name: checks assess observation against intent and baseline
     packages: [./check]
