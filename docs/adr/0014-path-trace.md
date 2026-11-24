@@ -32,4 +32,8 @@ On the 2026-11-13 corpus:
 - SHA2-LEF01 → SHA2-LEF10 traces as routed over L3VNI 20000 with ECMP over both spines.
 - SHA2-LEF01 → SHA2-BDR02 traces as bridged with a single ECMP path, because BDR02 lost an uplink.
 
-ACLs, firewall policy and path MTU are not evaluated; firemon covers firewall policy.
+Path MTU is judged from configuration only. VXLAN adds 50 bytes:
+- An underlay whose smallest healthy link MTU cannot carry a 1500-byte frame breaks the path.
+- An access port or gateway SVI configured above what the underlay carries is a warning, not a break. With 9216 on both the SVI and the underlay, the common design, frames above 9166 bytes are dropped.
+
+Layer-2 MTU set by network-qos is not collected, so an unconfigured access port is not judged. ACLs and firewall policy are not evaluated; firemon covers firewall policy.
