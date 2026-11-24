@@ -4,6 +4,8 @@
 
 ### Added
 
+- `fabric collect` 在全部维度采集完成后，额外按原文采集 `show bgp ipv4 unicast summary vrf all` 与 `show ip route summary vrf all`，为 border 南北向的 BGP 评估积累真实数据。这两条只保存不解析；设备不支持时跳过，不影响其他采集结果。尚未在真机上验证。
+
 - `fabric impact` 对 border 增加南北向评估。列出本机 VRF 的出口路由（静态路由及下一跳），并逐条判断同区域其他 border 能否接替：
   - 有自己的 fabric 外 FULL 邻接：有效备份；
   - 有自己的外部链路且 up、启用了 OSPF，但当前无邻接：通常是主备防火墙的备机，判为有风险并提示核实；

@@ -59,6 +59,16 @@ func (c *Client) Collect(ctx context.Context) (map[string]string, error) {
 				cfg, _ = nxos.ParseConfig(ctx, got[p.Command])
 			}
 		}
+		// Raw captures come last and are best effort: a command the
+		// switch rejects is skipped, the probes above are already safe.
+		for _, cmd := range nxos.RawCaptures() {
+			if ctx.Err() != nil {
+				return fmt.Errorf("netconnector: %w", context.Cause(ctx))
+			}
+			if got, err := collect(ctx, s, []string{cmd}); err == nil {
+				out[cmd] = got[cmd]
+			}
+		}
 		return nil
 	})
 	return out, err
