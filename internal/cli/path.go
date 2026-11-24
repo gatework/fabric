@@ -106,5 +106,5 @@ func printTrace(w io.Writer, t reach.Trace) {
 	default:
 		_ = term.Printf(w, "结论：✓ 双向转发路径完整（%s）\n", t.Mode)
 	}
-	_ = term.Printf(w, "注意：路径验证基于采集时的控制面与转发表，不包含 ACL、防火墙策略与 MTU 路径；需要时用 fabric check 与 firemon 补充。\n")
+	_ = term.Printf(w, "注意：路径验证基于采集时的控制面与转发表；MTU 只按配置判断（network-qos 设定的二层口 MTU 未采集），不包含 ACL 与防火墙策略（firemon 可补充）。\n")
 }

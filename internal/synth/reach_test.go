@@ -97,3 +97,21 @@ func TestTraceUnknownEndpoint(t *testing.T) {
 		t.Fatal("unknown endpoint traced")
 	}
 }
+
+func TestTraceBreaksOnAnUnderlayBelowStandardFrames(t *testing.T) {
+	t.Parallel()
+	f := small()
+	switches := assemble(f)
+	a, b := hosts(t, fabricOf(t, switches).Index, switches)
+	// Every fabric link at 1500: consistent, but too small for VXLAN.
+	for _, out := range f.Outputs {
+		out["show running-config"] = strings.ReplaceAll(out["show running-config"], "mtu 9216", "mtu 1500")
+	}
+	tr, err := fabricOf(t, assemble(f)).Trace(a, b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.Break == nil || !strings.HasPrefix(tr.Break.Step, "MTU") {
+		t.Fatalf("break = %+v", tr.Break)
+	}
+}

@@ -135,6 +135,9 @@ func (f Fabric) Trace(from, to string) (Trace, error) {
 		h.overlay("去程", f, sa, a, b, t.Mode)
 		h.overlay("回程", f, sb, b, a, t.Mode)
 		t.Spines = h.underlay(f, a.Switch, b.Switch)
+		if len(t.Spines) > 0 {
+			h.mtu(f, t, sa, sb)
+		}
 	}
 	h.segment("目的", sb, b, t)
 	h.access("目的", sb, b)
@@ -408,6 +411,99 @@ func (h *hops) underlay(f Fabric, a, b string) []string {
 	}
 	h.add("底层", step, v, ev, hint)
 	return both
+}
+
+// vxlanOverhead is what VXLAN adds to an endpoint frame on the underlay:
+// outer Ethernet, IPv4, UDP and VXLAN headers.
+const vxlanOverhead = 50
+
+// defaultMTU is the NX-OS default of a routed port without "mtu".
+const defaultMTU = 1500
+
+// mtu verifies that the underlay can carry the endpoints' frames once
+// encapsulated. An underlay that cannot carry a standard 1500-byte frame
+// breaks the path. An endpoint-side MTU configured above what the
+// underlay carries is a warning: the path works, but the largest frames
+// are dropped (9216 on both SVI and underlay is the common design and
+// drops frames above 9166 bytes). Layer-2 port MTU set by a network-qos
+// policy is not observed, so an unconfigured access port is not judged.
+func (h *hops) mtu(f Fabric, t Trace, sa, sb *device.Switch) {
+	under, ok := underlayMTU(f, t.From.Switch, t.To.Switch, t.Spines)
+	step := "MTU 底层 " + t.From.Switch + " ⇄ " + t.To.Switch
+	if !ok {
+		h.add("底层", step, topology.VerdictUnknown, "未采集互联配置", "")
+		return
+	}
+	carry := under - vxlanOverhead
+	if carry < defaultMTU {
+		h.add("底层", step, topology.VerdictFail, fmt.Sprintf("底层最小 MTU %d，封装后只能承载 %d 字节，标准 1500 字节报文会被丢弃", under, carry),
+			"把 fabric 互联 MTU 调到 9216（意图 underlay.mtu）")
+		return
+	}
+	for _, x := range []struct {
+		sw *device.Switch
+		e  End
+	}{{sa, t.From}, {sb, t.To}} {
+		if need, where := endpointMTU(x.sw, x.e, t.Mode); need > carry {
+			h.add("底层", step, topology.VerdictOK, fmt.Sprintf("底层最小 MTU %d，可承载 %d 字节的终端报文", under, carry),
+				fmt.Sprintf("%s 配置 MTU %d，大于 %d 字节的报文封装后超过底层 MTU 会被丢弃；终端巨帧请不超过 %d", where, need, carry, carry))
+			return
+		}
+	}
+	h.add("底层", step, topology.VerdictOK, fmt.Sprintf("底层最小 MTU %d，可承载 %d 字节的终端报文", under, carry), "")
+}
+
+// underlayMTU is the smallest MTU on the healthy links between the two
+// VTEPs and the ECMP spines, both ends of each link counted.
+func underlayMTU(f Fabric, a, b string, spines []string) (int, bool) {
+	least, seen := 0, false
+	for _, au := range f.Audits {
+		for _, c := range au.Links {
+			if !c.Healthy() {
+				continue
+			}
+			vtep, spine := c.A.Switch, c.B.Switch
+			if slices.Contains(spines, vtep) {
+				vtep, spine = spine, vtep
+			}
+			if (vtep != a && vtep != b) || !slices.Contains(spines, spine) {
+				continue
+			}
+			for _, e := range c.Ends {
+				if e.Layer == "" {
+					continue
+				}
+				m := e.MTU
+				if m == 0 {
+					m = defaultMTU
+				}
+				if !seen || m < least {
+					least, seen = m, true
+				}
+			}
+		}
+	}
+	return least, seen
+}
+
+// endpointMTU is the largest frame the endpoint's side is configured to
+// accept: the access port's explicit MTU, or, when routed, the gateway
+// SVI's. Zero means nothing explicit.
+func endpointMTU(sw *device.Switch, e End, m Mode) (int, string) {
+	if sw == nil || sw.Config == nil {
+		return 0, ""
+	}
+	port, _ := device.CanonicalInterface(e.Port)
+	if i, ok := sw.Config.Interfaces[port]; ok && i.MTU > 0 {
+		return i.MTU, e.Switch + " " + port
+	}
+	if m == ModeRouted {
+		svi := fmt.Sprintf("Vlan%d", e.VLAN)
+		if i, ok := sw.Config.Interfaces[svi]; ok && i.MTU > 0 {
+			return i.MTU, e.Switch + " " + svi
+		}
+	}
+	return 0, ""
 }
 
 func dash(s string) string {
